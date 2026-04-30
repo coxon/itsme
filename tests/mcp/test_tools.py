@@ -72,12 +72,17 @@ def test_ask_handler_rejects_unknown_mode(memory: Memory) -> None:
 
 
 @pytest.mark.parametrize("mode", ["auto", "wiki", "now"])
-def test_ask_handler_unsupported_mode_bubbles_not_implemented(
+def test_ask_handler_unsupported_mode_rejected_at_boundary(
     memory: Memory,
     mode: str,
 ) -> None:
-    """Documented-but-unimplemented modes all raise NotImplementedError."""
-    with pytest.raises(NotImplementedError):
+    """Documented-but-unimplemented modes raise ValueError at the tool layer.
+
+    Tool boundary deliberately rejects upfront so callers don't see
+    ``NotImplementedError`` leaking from core; the core itself still
+    raises NIE for direct callers (verified in tests/core/test_api).
+    """
+    with pytest.raises(ValueError, match="not yet supported"):
         ask_handler(memory, question="q", mode=mode)
 
 

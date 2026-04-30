@@ -41,8 +41,21 @@ def ask_handler(
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string")
 
-    if not isinstance(mode, str) or mode not in {"verbatim", "auto", "wiki", "now"}:
+    # v0.0.1 only accepts "verbatim" at the tool boundary. The other
+    # modes (auto / wiki / now) are documented in core for forward
+    # compat but explicitly rejected here so callers see a clean
+    # ValueError instead of a NotImplementedError leaking from Memory.
+    if not isinstance(mode, str):
+        raise ValueError(f"mode must be a string; got {mode!r}")
+    if mode == "verbatim":
+        pass
+    elif mode in {"auto", "wiki", "now"}:
+        raise ValueError(
+            f"mode={mode!r} is not yet supported in v0.0.1 — only 'verbatim' is available"
+        )
+    else:
         raise ValueError(f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}")
+
     # bool is a subclass of int in Python — reject it explicitly so
     # ``limit=True`` doesn't silently mean "1 hit".
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
@@ -52,7 +65,7 @@ def ask_handler(
 
     result = memory.ask(
         question=question,
-        mode=cast(Literal["verbatim", "auto", "wiki", "now"], mode),
+        mode=cast(Literal["verbatim"], mode),
         limit=limit,
     )
     return result.model_dump(mode="json")
