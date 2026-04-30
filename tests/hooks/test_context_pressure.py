@@ -312,6 +312,49 @@ def test_negative_disarm_drop_falls_back_to_default(
     assert bus.count() == 1
 
 
+def test_disarm_drop_above_one_falls_back_to_default(
+    tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """disarm_drop > 1 would make re-arm impossible — clamp back."""
+    transcript = tmp_path / "t.jsonl"
+    _transcript(transcript, chars=4000)
+
+    with caplog.at_level("WARNING"):
+        run_context_pressure(
+            _stdin(transcript),
+            bus=bus,
+            state_dir=state_dir,
+            threshold=0.05,
+            max_tokens=10_000,
+            disarm_drop=1.5,  # bogus — >100%
+        )
+
+    assert any("disarm_drop" in msg and "out of [0, 1]" in msg for msg in caplog.messages)
+    # Default kicks in, hook still fires once since we're armed.
+    assert bus.count() == 1
+
+
+def test_disarm_drop_nan_falls_back_to_default(
+    tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """NaN disarm_drop latches the disarmed branch forever — reject."""
+    transcript = tmp_path / "t.jsonl"
+    _transcript(transcript, chars=4000)
+
+    with caplog.at_level("WARNING"):
+        run_context_pressure(
+            _stdin(transcript),
+            bus=bus,
+            state_dir=state_dir,
+            threshold=0.05,
+            max_tokens=10_000,
+            disarm_drop=float("nan"),
+        )
+
+    assert any("non-finite" in msg for msg in caplog.messages)
+    assert bus.count() == 1
+
+
 def test_pressure_state_from_corrupt_dict_uses_defaults() -> None:
     """A type-mangled state file (manual edit, partial write) must
     NOT propagate ValueError — the hook would otherwise stay disabled
@@ -320,6 +363,27 @@ def test_pressure_state_from_corrupt_dict_uses_defaults() -> None:
     assert bad == PressureState()  # safe defaults
     bad2 = PressureState.from_dict({"last_triggered": None, "armed": False})
     assert bad2 == PressureState()
+
+
+def test_pressure_state_strict_type_checks() -> None:
+    """from_dict rejects bool-for-armed lookalikes and non-finite floats.
+
+    ``bool("false")`` returns True (Python truthiness), so a permissive
+    cast would silently accept string "false" as armed=True. Same for
+    float("nan") — valid float but meaningless as a pressure anchor and
+    poisons every ``<=`` comparison downstream.
+    """
+    # Non-bool armed
+    assert PressureState.from_dict({"last_triggered": 0.5, "armed": "false"}) == PressureState()
+    assert PressureState.from_dict({"last_triggered": 0.5, "armed": 1}) == PressureState()
+    # Non-finite last_triggered
+    nan_state = PressureState.from_dict({"last_triggered": float("nan"), "armed": True})
+    assert nan_state == PressureState()
+    inf_state = PressureState.from_dict({"last_triggered": float("inf"), "armed": True})
+    assert inf_state == PressureState()
+    # int is accepted and converted
+    rt = PressureState.from_dict({"last_triggered": 0, "armed": True})
+    assert rt == PressureState(last_triggered=0.0, armed=True)
 
 
 def test_rearm_at_exact_disarm_drop_boundary(

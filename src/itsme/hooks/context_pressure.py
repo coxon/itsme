@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,16 +80,22 @@ class PressureState:
         State files are tiny, infrequently written, and persist across
         process restarts — a corrupt one (wrong types after manual edit
         or partial write) must not disable the hook for the rest of the
-        session. Cast failures fall back to the safe default rather than
-        propagate.
+        session. Validation is strict about *types* rather than
+        permissive cast: ``bool("false")`` returns True, and
+        ``float("nan")`` is a valid float but meaningless as a
+        pressure anchor, so we reject both explicitly.
         """
-        try:
-            return cls(
-                last_triggered=float(data.get("last_triggered", 0.0)),
-                armed=bool(data.get("armed", True)),
-            )
-        except (TypeError, ValueError):
+        raw_last = data.get("last_triggered", 0.0)
+        raw_armed = data.get("armed", True)
+        if not isinstance(raw_armed, bool):
             return cls()
+        if isinstance(raw_last, bool):  # bool is subclass of int — reject
+            return cls()
+        if not isinstance(raw_last, int | float):
+            return cls()
+        if not math.isfinite(raw_last):
+            return cls()
+        return cls(last_triggered=float(raw_last), armed=raw_armed)
 
 
 # ------------------------------------------------------------- state IO
@@ -216,9 +223,12 @@ def run_context_pressure(
             DEFAULT_THRESHOLD,
         )
         resolved_threshold = DEFAULT_THRESHOLD
-    if disarm_drop < 0.0:
+    # disarm_drop must be a sane fraction too: ``>1`` would make re-arm
+    # impossible (pressure can never drop below zero), ``NaN`` breaks
+    # every ``<=`` comparison and latches the hook forever.
+    if not math.isfinite(disarm_drop) or not 0.0 <= disarm_drop <= 1.0:
         _logger.warning(
-            "itsme: disarm_drop=%r must be non-negative; falling back to %s",
+            "itsme: disarm_drop=%r out of [0, 1] or non-finite; falling back to %s",
             disarm_drop,
             DEFAULT_DISARM_DROP,
         )

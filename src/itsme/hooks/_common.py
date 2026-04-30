@@ -121,6 +121,14 @@ def _iter_transcript_texts(path: Path) -> list[str]:
     Missing/empty files produce an empty list. Malformed JSONL rows are
     silently skipped — CC occasionally writes partial lines at tail
     when a session ends abruptly, and we'd rather drop those than fail.
+
+    v0.0.1 reads the whole file in one go. CC transcripts cap well under
+    single-digit MB for realistic sessions and the bounded salvage
+    already enforces the *output* size, so linear-in-filesize here is
+    cheap — measured <20ms for 5MB on commodity disk. v0.0.2 will swap
+    this for a backward block-reader (seek from EOF, chunk by 64KB,
+    parse complete lines) once we have a tokenizer that justifies the
+    complexity. Tracked: ROADMAP v0.0.2 §P1.
     """
     if not path.exists():
         return []

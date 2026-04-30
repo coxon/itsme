@@ -75,8 +75,8 @@
 - [x] **T1.16** worker 调度方式：`WorkerScheduler` — 后台线程独立 asyncio loop（不复用 FastMCP loop，避免 head-of-line blocking）
 
 #### P0 — Hook
-- [x] **T1.17** CC hook 脚本：`hooks/hooks.json` + `hooks/cc/before-exit.sh` / `before-compact.sh`（CC SessionEnd / PreCompact 触发）。Python 实现：`itsme.hooks.lifecycle`，读 `transcript_path` JSONL 取 tail（默认 10K chars），emit `raw.captured` with `source=hook:before-<x>`。
-- [x] **T1.17b** **Context-pressure hook**（主动式）：CC `UserPromptSubmit` / `PostToolUse` 触发，读 `transcript_path` 估 tokens（`chars/4`），跨阈值（默认 0.70，可配 `$ITSME_CTX_THRESHOLD` / `$ITSME_CTX_MAX`）emit `raw.captured` with `source=hook:context-pressure`。Schmitt-trigger debounce：触发后须 pressure 跌 ≥10% (`disarm_drop`) 才重新 arm，状态持久化到 `~/.itsme/state/pressure-<sid>.json`。比 `before-compact` 早，抢救窗口大（v0.0.2 由 Aleph promoter 消费）。
+- [x] **T1.17** CC hook 脚本：`hooks/hooks.json` + `hooks/cc/before-exit.sh` / `before-compact.sh`（CC SessionEnd / PreCompact 触发）。Python 实现：`itsme.hooks.lifecycle`，读 `transcript_path` JSONL 取 tail（默认 10K chars），emit `raw.captured` with `source=hook:before-<x>` + `transcript_ref`。
+- [x] **T1.17b** **Context-pressure hook**（主动式）：CC `UserPromptSubmit` / `PostToolUse` 触发，读 `transcript_path` 估 tokens（`chars/4`），跨阈值（默认 0.70，可配 `$ITSME_CTX_THRESHOLD` / `$ITSME_CTX_MAX`）emit `raw.captured` with `source=hook:context-pressure` + `transcript_ref`。Schmitt-trigger debounce：触发后须 pressure 跌 ≥10% (`disarm_drop`) 才重新 arm，状态持久化到 `~/.itsme/state/pressure-<sid>.json`。比 `before-compact` 早，抢救窗口大（v0.0.2 由 Aleph promoter 消费）。
 - [ ] **T1.18** Codex hook 适配（先调研 Codex 的 hook 接口，按其规范实现）
 - [ ] **T1.19** hook 与 explicit remember 的去重标记
 
@@ -132,6 +132,7 @@
 #### 验收
 - [ ] **T2.23** 一个完整 session：聊 → 退出 → vault 出现新 .md → ask 命中 wiki
 - [ ] **T2.24** 能在 Obsidian 打开 vault，看到 frontmatter + 章节渲染正常
+- [ ] **T2.25** `itsme.hooks._common._iter_transcript_texts` 改成尾部增量读（从 EOF 往回 seek + 按块解析完整 JSONL 行），替换当前 `read_text()` 整文件方案。v0.0.1 transcripts 小，不痛；v0.0.2 接 Aleph promoter 后吞吐变大再优化。
 
 ---
 
