@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from itsme.core import Memory, build_default_memory, default_db_path
+from itsme.core.workers import WorkerScheduler
 from itsme.mcp.tools.ask import ask_handler
 from itsme.mcp.tools.remember import remember_handler
 from itsme.mcp.tools.status import status_handler
@@ -95,8 +96,12 @@ def main() -> None:
     Boot sequence:
 
     1. Build a :class:`Memory` instance pointed at the events ring.
-    2. Register the 3 verbs on a :class:`FastMCP` server.
-    3. Run stdio until the host disconnects.
+    2. Spin up a :class:`WorkerScheduler` running the router consume
+       loop in a background thread (handles hook-emitted
+       ``raw.captured`` events while ``Memory.remember`` keeps its
+       sync fast-path).
+    3. Register the 3 verbs on a :class:`FastMCP` server.
+    4. Run stdio until the host disconnects.
 
     The function returns normally on clean shutdown so packaging /
     plugin smoke tests can drive it without raising.
@@ -105,10 +110,21 @@ def main() -> None:
         project=_resolve_project(),
         db_path=_resolve_db_path(),
     )
+    scheduler = WorkerScheduler()
     try:
+        # Register the router consume_loop as a background worker so
+        # raw.captured events from hooks (source != 'explicit') get
+        # routed while the MCP request loop stays free.
+        scheduler.add_worker(memory.consume_loop)
+        scheduler.start()
+
         server = build_server(memory)
         server.run("stdio")
     finally:
+        # ``stop`` is idempotent and a no-op when start() never reached
+        # the alive state, so it's safe to call even if scheduler.start
+        # raised mid-boot.
+        scheduler.stop()
         memory.close()
 
 

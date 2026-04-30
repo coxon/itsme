@@ -24,6 +24,7 @@
 - ✅ Vault 默认路径：`~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
 - ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（v0.0.1，见 `core/adapters/mempalace.py`）；stdio MCP-client backend 推迟到 T1.13.5
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
+- ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
 
 ---
 
@@ -70,8 +71,8 @@
 - [x] **T1.14** wing/room 命名规范（itsme 默认用 `wing_<project>` / `room_<topic>`，namespace 隔离）
 
 #### P0 — Worker
-- [ ] **T1.15** router worker（规则路由，仅靠 `kind` 与简单关键词）
-- [ ] **T1.16** worker 调度方式：进程内 asyncio loop（先简单）
+- [x] **T1.15** router worker（规则路由，仅靠 `kind` 与简单关键词；sync fast-path + async consume loop，参见 `core/workers/router.py`）
+- [x] **T1.16** worker 调度方式：`WorkerScheduler` — 后台线程独立 asyncio loop（不复用 FastMCP loop，避免 head-of-line blocking）
 
 #### P0 — Hook
 - [ ] **T1.17** CC hook 脚本：`hooks/cc/before-exit`、`before-clear`、`before-compact`（最小：把待丢失上下文塞进 events as `raw.captured`，标 `source=hook:before-<x>`）
