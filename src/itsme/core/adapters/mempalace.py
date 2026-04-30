@@ -124,12 +124,14 @@ class InMemoryMemPalaceAdapter:
     ) -> MemPalaceWriteResult:
         if not content.strip():
             raise ValueError("content must be non-empty")
-        if not wing or not room:
+        wing_clean = wing.strip()
+        room_clean = room.strip()
+        if not wing_clean or not room_clean:
             raise ValueError("wing and room are required")
         drawer = _Drawer(
             drawer_id=str(ULID()),
-            wing=wing,
-            room=room,
+            wing=wing_clean,
+            room=room_clean,
             content=content,
             source_file=source_file,
             tokens=frozenset(_tokens(content)),

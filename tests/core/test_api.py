@@ -121,6 +121,7 @@ def test_ask_scopes_to_project_wing_by_default(memory: Memory) -> None:
     other.write(content="other project memory", wing="wing_other", room="room_x")
 
     res = memory.ask("memory")
+    assert res.sources, "expected at least one hit from the project's wing"
     assert all("project-local" in s.content for s in res.sources)
 
 

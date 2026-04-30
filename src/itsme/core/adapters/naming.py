@@ -31,10 +31,11 @@ def _slug(raw: str) -> str:
 def wing(project: str) -> str:
     """Return the canonical ``wing_<slug>`` for *project*.
 
-    Already-prefixed input (``wing_foo``) round-trips unchanged so callers
-    can pass either a raw project name or a previously-formatted wing.
+    Already-prefixed input (``wing_foo`` / ``WING_foo``) round-trips so
+    callers can pass either a raw project name or a previously-formatted
+    wing without double-prefixing.
     """
-    if project.startswith(_WING_PREFIX):
+    if project.casefold().startswith(_WING_PREFIX):
         # Validate the suffix is itself a clean slug.
         return _WING_PREFIX + _slug(project[len(_WING_PREFIX) :])
     return _WING_PREFIX + _slug(project)
@@ -42,6 +43,6 @@ def wing(project: str) -> str:
 
 def room(topic: str) -> str:
     """Return the canonical ``room_<slug>`` for *topic*."""
-    if topic.startswith(_ROOM_PREFIX):
+    if topic.casefold().startswith(_ROOM_PREFIX):
         return _ROOM_PREFIX + _slug(topic[len(_ROOM_PREFIX) :])
     return _ROOM_PREFIX + _slug(topic)

@@ -71,18 +71,28 @@ def test_ask_handler_rejects_unknown_mode(memory: Memory) -> None:
         ask_handler(memory, question="q", mode="exfiltrate")
 
 
+@pytest.mark.parametrize("mode", ["auto", "wiki", "now"])
 def test_ask_handler_unsupported_mode_bubbles_not_implemented(
     memory: Memory,
+    mode: str,
 ) -> None:
-    """Documented-but-unimplemented modes get NotImplementedError."""
+    """Documented-but-unimplemented modes all raise NotImplementedError."""
     with pytest.raises(NotImplementedError):
-        ask_handler(memory, question="q", mode="auto")
+        ask_handler(memory, question="q", mode=mode)
 
 
 def test_ask_handler_rejects_non_positive_limit(memory: Memory) -> None:
     """limit must be positive int."""
     with pytest.raises(ValueError):
         ask_handler(memory, question="q", limit=0)
+
+
+def test_ask_handler_rejects_oversized_limit(memory: Memory) -> None:
+    """limit must respect MAX_LIMIT (defends against runaway queries)."""
+    from itsme.mcp.tools.ask import MAX_LIMIT
+
+    with pytest.raises(ValueError, match=str(MAX_LIMIT)):
+        ask_handler(memory, question="q", limit=MAX_LIMIT + 1)
 
 
 # --------------------------------------------------------- status
@@ -112,3 +122,17 @@ def test_status_handler_rejects_unknown_format(memory: Memory) -> None:
     """Format is whitelisted."""
     with pytest.raises(ValueError):
         status_handler(memory, format="xml")
+
+
+def test_status_handler_rejects_non_positive_limit(memory: Memory) -> None:
+    """limit must be a positive int (defensive — Memory also checks)."""
+    with pytest.raises(ValueError):
+        status_handler(memory, limit=0)
+
+
+def test_status_handler_rejects_oversized_limit(memory: Memory) -> None:
+    """limit must respect MAX_LIMIT (bounds JSON / feed payload size)."""
+    from itsme.mcp.tools.status import MAX_LIMIT
+
+    with pytest.raises(ValueError, match=str(MAX_LIMIT)):
+        status_handler(memory, limit=MAX_LIMIT + 1)

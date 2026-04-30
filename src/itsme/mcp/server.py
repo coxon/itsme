@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from itsme.core import Memory, build_default_memory
+from itsme.core import Memory, build_default_memory, default_db_path
 from itsme.mcp.tools.ask import ask_handler
 from itsme.mcp.tools.remember import remember_handler
 from itsme.mcp.tools.status import status_handler
@@ -77,11 +77,11 @@ def build_server(memory: Memory) -> FastMCP[Any]:
 
 
 def _resolve_db_path() -> Path:
-    """Honor ``$ITSME_DB_PATH`` if set, else fall back to default."""
+    """Honor ``$ITSME_DB_PATH`` if set, else fall back to the shared default."""
     raw = os.environ.get("ITSME_DB_PATH")
     if raw:
         return Path(raw).expanduser()
-    return Path.home() / ".itsme" / "events.db"
+    return default_db_path()
 
 
 def _resolve_project() -> str:

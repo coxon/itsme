@@ -48,6 +48,27 @@ def test_write_rejects_missing_wing_or_room() -> None:
         a.write(content="ok", wing="w", room="")
 
 
+def test_write_rejects_whitespace_only_wing_or_room() -> None:
+    """Whitespace-only wing/room must NOT slip through (regression).
+
+    The earlier check used a truthiness test that accepted ``"   "`` as
+    a non-empty wing, which would persist drawers under garbage names.
+    """
+    a = InMemoryMemPalaceAdapter()
+    with pytest.raises(ValueError):
+        a.write(content="ok", wing="   ", room="r")
+    with pytest.raises(ValueError):
+        a.write(content="ok", wing="w", room="\t\n")
+
+
+def test_write_strips_wing_and_room_whitespace() -> None:
+    """Surrounding whitespace is trimmed before persistence."""
+    a = InMemoryMemPalaceAdapter()
+    res = a.write(content="ok", wing="  wing_x  ", room="\troom_y\n")
+    assert res.wing == "wing_x"
+    assert res.room == "room_y"
+
+
 def test_search_returns_hits_ranked_by_score() -> None:
     """Higher overlap → higher score, top result first."""
     a = InMemoryMemPalaceAdapter()

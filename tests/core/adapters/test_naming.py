@@ -29,6 +29,23 @@ def test_wing_idempotent_on_already_prefixed() -> None:
     assert wing("wing_FOO") == "wing_foo"
 
 
+def test_wing_idempotent_on_uppercase_prefix() -> None:
+    """``WING_foo`` / ``Wing_foo`` must NOT double-prefix to ``wing_wing-foo``.
+
+    Regression: prefix detection used to be case-sensitive, so any
+    capitalisation of the literal prefix slipped through and got
+    re-prefixed by the slugifier.
+    """
+    assert wing("WING_foo") == "wing_foo"
+    assert wing("Wing_Bar") == "wing_bar"
+
+
+def test_room_idempotent_on_uppercase_prefix() -> None:
+    """``ROOM_foo`` / ``Room_foo`` must NOT double-prefix."""
+    assert room("ROOM_foo") == "room_foo"
+    assert room("Room_Bar") == "room_bar"
+
+
 def test_wing_rejects_empty_after_slug() -> None:
     """A name that slugifies to empty must error, not produce ``wing_``."""
     with pytest.raises(ValueError, match="slug"):

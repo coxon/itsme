@@ -10,6 +10,10 @@ from typing import Any
 
 from itsme.core import Memory
 
+#: Hard upper bound on a single ``status`` request — keeps the feed
+#: rendering and the JSON payload bounded for MCP transport.
+MAX_LIMIT = 500
+
 
 def status_handler(
     memory: Memory,
@@ -25,7 +29,7 @@ def status_handler(
         scope: ``recent`` / ``today`` / ``session``.
         format: ``json`` (machine-readable) or ``feed`` (newline-
             joined human-readable strings).
-        limit: Max events.
+        limit: Max events (1 ≤ limit ≤ :data:`MAX_LIMIT`).
 
     Returns:
         For ``format='json'``: :class:`itsme.core.StatusResult` as a
@@ -39,6 +43,8 @@ def status_handler(
         raise ValueError(f"format must be 'json' or 'feed'; got {format!r}")
     if not isinstance(limit, int) or limit <= 0:
         raise ValueError("limit must be a positive integer")
+    if limit > MAX_LIMIT:
+        raise ValueError(f"limit must be a positive integer and <= {MAX_LIMIT}; got {limit}")
 
     result = memory.status(scope=scope, limit=limit)  # type: ignore[arg-type]
 

@@ -15,6 +15,10 @@ from typing import Any
 
 from itsme.core import Memory
 
+#: Hard upper bound on a single ``ask`` so a malicious or buggy caller
+#: can't ask MemPalace for thousands of hits and pin the bus.
+MAX_LIMIT = 100
+
 
 def ask_handler(
     memory: Memory,
@@ -29,7 +33,7 @@ def ask_handler(
         memory: Process-wide :class:`Memory` instance.
         question: Natural-language query. Must be non-empty.
         mode: Read strategy. v0.0.1 only accepts ``"verbatim"``.
-        limit: Max number of hits.
+        limit: Max number of hits (1 ≤ limit ≤ :data:`MAX_LIMIT`).
 
     Returns:
         Plain-dict view of :class:`itsme.core.AskResult`.
@@ -41,6 +45,8 @@ def ask_handler(
         raise ValueError(f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}")
     if not isinstance(limit, int) or limit <= 0:
         raise ValueError("limit must be a positive integer")
+    if limit > MAX_LIMIT:
+        raise ValueError(f"limit must be a positive integer and <= {MAX_LIMIT}; got {limit}")
 
     result = memory.ask(question=question, mode=mode, limit=limit)  # type: ignore[arg-type]
     return result.model_dump(mode="json")
