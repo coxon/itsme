@@ -33,6 +33,7 @@ before-exit   · before-clear   · before-compact
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 完整架构（双引擎、EventBus、Aleph pipeline、关键流）
 - [docs/ROADMAP.md](docs/ROADMAP.md) — milestone & 任务分解（v0.0.1 → v0.0.5+）
+- [docs/ICONS.md](docs/ICONS.md) — 图标资产设计与发布计划
 - [docs/INSTALL.md](docs/INSTALL.md) — 各 IDE 安装矩阵（CC · Codex）
 - [CONTRIBUTING.md](CONTRIBUTING.md) — git-flow 分支模型、提交规范
 
