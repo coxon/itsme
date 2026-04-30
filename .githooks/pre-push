@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# itsme — pre-push hook
+# 阻止直接 push 到 main 分支
+
+protected_branch="main"
+remote="$1"
+
+while read local_ref local_sha remote_ref remote_sha; do
+  branch="${remote_ref#refs/heads/}"
+  if [ "$branch" = "$protected_branch" ]; then
+    # 仅允许"快进式"或"通过 PR 合并"路径达到 main
+    # 直接 push 到 main 一律拒绝
+    echo ""
+    echo "❌ Refusing direct push to '$protected_branch'."
+    echo ""
+    echo "   Per CONTRIBUTING.md, all changes must go through a"
+    echo "   feature/* branch and a Pull Request."
+    echo ""
+    echo "   To bypass (NOT recommended): git push --no-verify"
+    echo ""
+    exit 1
+  fi
+done
+
+exit 0
