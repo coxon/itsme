@@ -33,6 +33,8 @@ def test_subpackages_importable() -> None:
     import itsme.core.events.schema  # noqa: F401
     import itsme.core.llm  # noqa: F401
     import itsme.core.workers  # noqa: F401
+    import itsme.core.workers.router  # noqa: F401
+    import itsme.core.workers.scheduler  # noqa: F401
     import itsme.mcp  # noqa: F401
     import itsme.mcp.tools  # noqa: F401
     import itsme.mcp.tools.ask  # noqa: F401

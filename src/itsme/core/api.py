@@ -5,9 +5,11 @@ work happens here: emit events, talk to adapters, return structured
 results.  This way the same orchestrator is reachable from MCP tools,
 hooks, and tests without a tool-protocol roundtrip.
 
-v0.0.1 contract (matches ROADMAP T1.10–T1.12):
+v0.0.1 contract (matches ROADMAP T1.10–T1.15):
 
-* :meth:`Memory.remember` — fast-path write to MemPalace, no router yet.
+* :meth:`Memory.remember` — fast-path write through the rule-based
+  :class:`Router` worker (T1.15). Each call emits ``raw.captured``
+  → ``memory.routed`` → ``memory.stored`` synchronously.
 * :meth:`Memory.ask` — direct verbatim search; ``mode='auto'`` /
   ``promote=True`` are deferred to v0.0.2 / v0.0.3.
 * :meth:`Memory.status` — read events ring.
@@ -15,7 +17,7 @@ v0.0.1 contract (matches ROADMAP T1.10–T1.12):
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Coroutine, Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -27,9 +29,9 @@ from itsme.core.adapters import (
     MemPalaceAdapter,
     MemPalaceHit,
 )
-from itsme.core.adapters.naming import room as _room
 from itsme.core.adapters.naming import wing as _wing
 from itsme.core.events import EventBus, EventEnvelope, EventType
+from itsme.core.workers.router import Router
 
 # All 4 documented modes are part of the type even though only
 # ``verbatim`` is implemented in v0.0.1 — the others raise
@@ -39,16 +41,6 @@ AskMode = Literal["verbatim", "auto", "wiki", "now"]
 RememberKind = Literal["decision", "fact", "feeling", "todo", "event", "general"]
 StatusScope = Literal["recent", "today", "session"]
 StatusFormat = Literal["json", "feed"]
-
-# Mapping from kind → room slug. Unknown kind falls back to ``general``.
-_KIND_ROOMS: dict[str, str] = {
-    "decision": "decisions",
-    "fact": "facts",
-    "feeling": "feelings",
-    "todo": "todos",
-    "event": "events",
-    "general": "general",
-}
 
 
 class RememberResult(BaseModel):
@@ -131,6 +123,7 @@ class Memory:
         self._bus = bus
         self._adapter: MemPalaceAdapter = adapter or InMemoryMemPalaceAdapter()
         self._wing = _wing(project)
+        self._router = Router(bus=self._bus, adapter=self._adapter, wing=self._wing)
 
     # ------------------------------------------------------------------ remember
     def remember(
@@ -140,19 +133,21 @@ class Memory:
         *,
         source: str = "explicit",
     ) -> RememberResult:
-        """Persist *content* to MemPalace and emit two events.
+        """Persist *content* to MemPalace via the router fast-path.
 
-        v0.0.1 fast-path — no router, no LLM. Each call:
+        v0.0.1 sync flow — no LLM. Each call:
 
         1. emits ``raw.captured``
-        2. writes a drawer in the project's wing under a kind-derived
-           room (``general`` if *kind* is ``None``)
-        3. emits ``memory.stored``
+        2. delegates to :meth:`Router.route_and_store`, which decides
+           wing/room (rule-based), emits ``memory.routed``, writes the
+           drawer, and emits ``memory.stored``.
 
         Args:
             content: Verbatim text to store. Empty strings are rejected.
             kind: Optional hint that selects the room. Recognised values
-                map 1-to-1; anything else falls back to ``general``.
+                map 1-to-1 (``decision``, ``fact``, ``feeling``,
+                ``todo``, ``event``); unknown values are dropped and
+                routing falls back to keyword inference / ``general``.
             source: Producer label written into the event envelope.
 
         Returns:
@@ -165,31 +160,17 @@ class Memory:
         if not content.strip():
             raise ValueError("remember(content=...) must be non-empty")
 
-        room_label = _KIND_ROOMS.get(kind or "general", "general")
-        room_slug = _room(room_label)
-
         raw_evt = self._bus.emit(
             type=EventType.RAW_CAPTURED,
             source=source,
             payload={"content": content, "kind": kind},
         )
 
-        write_res = self._adapter.write(
-            content=content,
-            wing=self._wing,
-            room=room_slug,
-        )
+        write_res = self._router.route_and_store(raw_evt)
 
-        stored_evt = self._bus.emit(
-            type=EventType.MEMORY_STORED,
-            source="adapter:mempalace",
-            payload={
-                "drawer_id": write_res.drawer_id,
-                "wing": write_res.wing,
-                "room": write_res.room,
-                "raw_event_id": raw_evt.id,
-            },
-        )
+        # ``route_and_store`` emits ``memory.stored`` last; tail it back
+        # so we can hand the caller a stable event id.
+        stored_id = self._latest_stored_event_id(raw_evt.id)
 
         return RememberResult(
             id=raw_evt.id,
@@ -197,8 +178,23 @@ class Memory:
             wing=write_res.wing,
             room=write_res.room,
             routed_to=[f"mempalace:{write_res.drawer_id}"],
-            stored_event_id=stored_evt.id,
+            stored_event_id=stored_id,
         )
+
+    def _latest_stored_event_id(self, raw_event_id: str) -> str:
+        """Find the ``memory.stored`` event the router just emitted.
+
+        The router emits ``memory.stored`` last, so the newest matching
+        event in the ring is the one we want. If somehow nothing matches
+        (only happens if the bus was concurrently truncated, which the
+        ring buffer doesn't do) we fall back to the most recent
+        ``memory.stored`` to keep the contract non-empty.
+        """
+        recent = self._bus.tail(n=10, types=[EventType.MEMORY_STORED])
+        for env in recent:
+            if env.payload.get("raw_event_id") == raw_event_id:
+                return env.id
+        return recent[0].id if recent else ""
 
     # ------------------------------------------------------------------ ask
     def ask(
@@ -320,6 +316,25 @@ class Memory:
         return StatusResult(scope=scope, count=len(flat), events=flat)
 
     # ------------------------------------------------------------------ lifecycle
+    def consume_loop(
+        self,
+        *,
+        ignore_sources: Iterable[str] = ("explicit",),
+        poll_interval: float = 0.5,
+    ) -> Coroutine[Any, Any, None]:
+        """Return the router's async consume loop coroutine.
+
+        Used by ``itsme.mcp.server`` to register a background worker
+        with the :class:`WorkerScheduler`. The loop reads
+        ``raw.captured`` events whose source is **not** in
+        *ignore_sources* (default: ``("explicit",)`` so the sync
+        fast-path is not double-processed).
+        """
+        return self._router.consume_loop(
+            ignore_sources=ignore_sources,
+            poll_interval=poll_interval,
+        )
+
     def close(self) -> None:
         """Close the bus and adapter. Safe to call multiple times."""
         self._adapter.close()
