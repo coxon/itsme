@@ -94,6 +94,41 @@ def test_envelope_rejects_short_id() -> None:
         )
 
 
+def test_envelope_rejects_non_crockford_id() -> None:
+    """Crockford base32 excludes I, L, O, U — ids using them must fail."""
+    bad_ids = [
+        "01HXYZ0000000000000000000I",  # contains I
+        "01HXYZ0000000000000000000L",  # contains L
+        "01HXYZ0000000000000000000O",  # contains O
+        "01HXYZ0000000000000000000U",  # contains U
+        "abcdefghijklmnopqrstuvwxyz",  # lowercase
+        "!@#$%^&*()_+0123456789ABCD",  # symbols + only 26 chars
+    ]
+    for bad in bad_ids:
+        assert len(bad) == 26, f"test data wrong: {bad!r}"
+        with pytest.raises(ValidationError):
+            EventEnvelope(
+                id=bad,
+                ts=datetime.now(tz=UTC),
+                type=EventType.RAW_CAPTURED,
+                source="test",
+            )
+
+
+def test_envelope_accepts_real_ulid() -> None:
+    """Real python-ulid output passes the Crockford check."""
+    from ulid import ULID
+
+    real_id = str(ULID())
+    env = EventEnvelope(
+        id=real_id,
+        ts=datetime.now(tz=UTC),
+        type=EventType.RAW_CAPTURED,
+        source="test",
+    )
+    assert env.id == real_id
+
+
 def test_envelope_rejects_empty_source() -> None:
     """Source must identify *some* producer."""
     with pytest.raises(ValidationError):

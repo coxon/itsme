@@ -35,6 +35,8 @@
 | **v0.0.4** | Curator + 体验 | 去重、KG 失效、skill 文档完整、status feed 渲染 | ~1.5 周 |
 | **v0.0.5+** | 长尾 | 跨 session 主题聚类、主动召回、KG 推理、用户笔记区块契约 | — |
 
+> **🎨 Icon track（平行路线）**：图标资产按 phase I1 / I2 / I3 / I4 分别挂在 v0.0.1 / v0.0.2 / v0.0.4 / v0.1+ 上一起发布。详见 [docs/ICONS.md](./ICONS.md)。
+
 ---
 
 ## v0.0.1 — End-to-end stub
@@ -52,7 +54,7 @@
 #### P0 — EventBus
 - [x] **T1.5** 定义 envelope schema（`core/events/schema.py`，pydantic）
 - [x] **T1.6** sqlite ring buffer 实现（`core/events/ringbuf.py`，500 条容量可配）
-- [x] **T1.7** `events.append()` / `events.tail(n)` / `events.consume()` API
+- [x] **T1.7** EventBus facade API：`emit(type, source, payload)` / `tail(n, types?)` / `since(cursor_id, types?, limit)` / `count()` / `close()`
 - [x] **T1.8** ULID 生成、ts 注入
 
 #### P0 — MCP Surface

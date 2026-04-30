@@ -183,7 +183,10 @@ def _build_filter(
 
     Returns:
         ``(where_clause, params)`` — *where_clause* is empty string if no
-        filters apply.
+        filters apply. When *types* is an explicitly empty iterable, the
+        clause short-circuits to ``WHERE 1=0`` and *params* is reset to
+        ``[]`` so the caller's downstream ``params.append(limit)`` lines
+        up with the placeholders that actually exist in the SQL.
     """
     clauses: list[str] = []
     params: list[Any] = []
@@ -194,7 +197,9 @@ def _build_filter(
         type_list = list(types)
         if not type_list:
             # Empty iterable means "no types match" — short-circuit.
-            return "WHERE 1=0", params
+            # Drop any earlier params (e.g. cursor_id) because the
+            # WHERE 1=0 clause has no placeholders to bind them to.
+            return "WHERE 1=0", []
         placeholders = ",".join("?" for _ in type_list)
         clauses.append(f"type IN ({placeholders})")
         params.extend(t.value for t in type_list)

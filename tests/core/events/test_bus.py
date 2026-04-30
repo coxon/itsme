@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -29,16 +30,17 @@ def test_emit_returns_populated_envelope(bus: EventBus) -> None:
     )
     assert isinstance(env, EventEnvelope)
     assert len(env.id) == 26
-    assert env.ts.tzinfo is not None  # UTC-aware
+    assert env.ts.tzinfo == UTC
     assert env.source == "test"
     assert env.payload == {"content": "hello"}
 
 
 def test_emit_injects_utc_timestamp(bus: EventBus) -> None:
-    """Emitted ts is UTC-aware and close to 'now'."""
+    """Emitted ts is strictly UTC and close to 'now'."""
     before = datetime.now(tz=UTC)
     env = bus.emit(type=EventType.RAW_CAPTURED, source="clock")
     after = datetime.now(tz=UTC)
+    assert env.ts.tzinfo == UTC
     assert before <= env.ts <= after
 
 
@@ -57,6 +59,28 @@ def test_emit_defaults_payload_to_empty_dict(bus: EventBus) -> None:
     """None payload becomes {}."""
     env = bus.emit(type=EventType.MEMORY_QUERIED, source="t")
     assert env.payload == {}
+
+
+def test_emit_isolates_payload_from_caller_mutation(bus: EventBus) -> None:
+    """Producer mutating the original dict must NOT affect the emitted event.
+
+    Pydantic v2 doesn't deep-copy dicts on construction, so the bus
+    must itself snapshot the payload to keep frozen envelopes truly
+    frozen — including nested containers.
+    """
+    nested: dict[str, Any] = {"tags": ["a", "b"]}
+    payload: dict[str, Any] = {"content": "hello", "meta": nested}
+
+    env = bus.emit(type=EventType.RAW_CAPTURED, source="x", payload=payload)
+
+    # Top-level mutation
+    payload["content"] = "TAMPERED"
+    payload["new_key"] = "leak"
+    # Nested mutation
+    nested["tags"].append("c")
+    nested["sneak"] = "in"
+
+    assert env.payload == {"content": "hello", "meta": {"tags": ["a", "b"]}}
 
 
 def test_tail_sees_emitted_events(bus: EventBus) -> None:

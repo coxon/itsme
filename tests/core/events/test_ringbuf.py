@@ -90,6 +90,23 @@ def test_empty_type_filter_returns_nothing(ring: RingBuffer) -> None:
     assert ring.tail(n=10, types=[]) == []
 
 
+def test_empty_type_filter_with_cursor_does_not_misbind(
+    ring: RingBuffer,
+) -> None:
+    """Regression: ``since(cursor_id=X, types=[])`` must not raise.
+
+    Earlier ``_build_filter`` returned ``WHERE 1=0`` while still leaving
+    the cursor_id in the params list, causing a sqlite binding-count
+    mismatch.
+    """
+    a = _make_event(source="a")
+    ring.append(a)
+    ring.append(_make_event(source="b"))
+    # Should return [] cleanly, not raise sqlite3.ProgrammingError.
+    assert ring.since(cursor_id=a.id, types=[]) == []
+    assert ring.tail(n=5, types=[]) == []
+
+
 def test_since_oldest_first_strictly_after_cursor(ring: RingBuffer) -> None:
     """since(cursor_id) returns events whose id > cursor, ordered ascending."""
     a = _make_event(source="a")

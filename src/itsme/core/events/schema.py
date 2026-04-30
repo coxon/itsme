@@ -69,7 +69,11 @@ class EventEnvelope(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    id: str = Field(min_length=26, max_length=26)
+    # ULIDs are 26 chars of Crockford base32: digits 0-9 plus
+    # uppercase A-Z minus the visually ambiguous I, L, O, U.
+    # Reject anything that isn't shaped like a ULID — guards against
+    # stray UUIDs, hex blobs, or arbitrary 26-char strings sneaking in.
+    id: str = Field(pattern=r"^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$")
     ts: datetime
     type: EventType
     source: str = Field(min_length=1)

@@ -14,6 +14,7 @@ This is what MCP tools, workers, and hooks talk to. They never touch
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +45,10 @@ class EventBus:
     ) -> EventEnvelope:
         """Build an envelope (ULID + utcnow) and append to the ring.
 
+        The *payload* is deep-copied before being stored on the frozen
+        envelope, so mutations to the caller's original dict (including
+        nested containers) cannot leak into the emitted event.
+
         Args:
             type: Event type — must be one of the 6 :class:`EventType`
                 members.
@@ -53,12 +58,13 @@ class EventBus:
         Returns:
             The fully populated envelope (frozen).
         """
+        frozen_payload = copy.deepcopy(payload) if payload else {}
         env = EventEnvelope(
             id=str(ULID()),
             ts=datetime.now(tz=UTC),
             type=type,
             source=source,
-            payload=payload or {},
+            payload=frozen_payload,
             schema_version=1,
         )
         self._ring.append(env)
