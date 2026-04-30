@@ -1,0 +1,27 @@
+# itsme — default configuration
+# Copy to ~/.itsme/config.toml and edit to override.
+
+[vault]
+# Aleph 的 Obsidian vault（从 v0.0.2 启用）。
+# 与现有 ~/Documents/Aleph/ 同级，互不干扰。
+path = "~/Documents/itsme"
+
+[llm]
+# v0.0.x 先支持 Anthropic；provider 抽象在 core/llm.py（T2.6）
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+
+[events]
+# sqlite ring buffer 容量（条数）
+ring_capacity = 500
+# events.db 落地路径
+db_path = "~/.itsme/events.db"
+
+[embedding]
+# v0.0.3 启用；本地 sentence-transformers
+provider = "sentence-transformers"
+model = "BAAI/bge-small-en-v1.5"
+
+[hooks]
+# v0.0.1：consolidation 边界 = before-exit / before-clear / before-compact
+enabled = ["before-exit", "before-clear", "before-compact"]

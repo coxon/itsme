@@ -546,23 +546,47 @@ promoter
 
 ## 9. Plugin Layout
 
+采用 **src-layout**：所有 Python 代码归属单一顶级包 `itsme`，避免与 MCP SDK
+（`mcp` 包名）冲突。非 Python 资源（skills / hooks / config / docs / tests）
+留在仓库根，跟 `src/` 平级。
+
 ```
-itsme/
-├── plugin.json                   # CC/Codex plugin manifest
-├── manifest.skill.md             # skill 注册入口
-├── README.md
+itsme/                            # git repo root
+├── .claude-plugin/
+│   └── plugin.json               # CC plugin 注册（mcpServers + skills）
 │
-├── mcp/                          # 对外 3 个 verb
-│   ├── server.py
-│   └── tools/
-│       ├── remember.py
-│       ├── ask.py
-│       └── status.py
+├── src/
+│   └── itsme/                    # ← 唯一的 Python 包根
+│       ├── __init__.py
+│       ├── mcp/                  # 对外 3 个 verb（itsme.mcp.*）
+│       │   ├── server.py
+│       │   └── tools/
+│       │       ├── remember.py
+│       │       ├── ask.py
+│       │       └── status.py
+│       └── core/                 # 内部引擎（agent 不可见）
+│           ├── events/
+│           │   ├── schema.py
+│           │   └── ringbuf.py
+│           ├── workers/
+│           │   ├── router.py
+│           │   ├── promoter.py
+│           │   ├── curator.py
+│           │   └── reader.py
+│           ├── adapters/
+│           │   └── mempalace.py  # 包装 MemPalace MCP
+│           ├── aleph/            # ← 自建，见 §7.2.1
+│           │   ├── api.py
+│           │   ├── pipeline/
+│           │   ├── store/
+│           │   ├── search.py
+│           │   ├── prompts/
+│           │   └── types.py
+│           └── llm.py            # LLM provider 抽象
 │
-├── skills/                       # 给 agent 的剧本
-│   ├── itsme.md                  # 主 skill
-│   ├── triggers.md               # 何时该 remember
-│   └── usage.md                  # ask/status 范式
+├── skills/                       # 给 agent 的剧本（markdown，非代码）
+│   └── itsme/
+│       └── SKILL.md
 │
 ├── hooks/                        # 各 IDE 的 hook 适配脚本
 │   ├── cc/                       # Claude Code
@@ -572,26 +596,6 @@ itsme/
 │   └── codex/                    # Codex（hook 名按其规范映射）
 │       └── ...
 │
-├── core/                         # 内部引擎（agent 不可见）
-│   ├── events/
-│   │   ├── schema.py
-│   │   └── ringbuf.py
-│   ├── workers/
-│   │   ├── router.py
-│   │   ├── promoter.py
-│   │   ├── curator.py
-│   │   └── reader.py
-│   ├── adapters/
-│   │   └── mempalace.py          # 包装 MemPalace MCP
-│   ├── aleph/                    # ← 自建，见 §7.2.1
-│   │   ├── api.py
-│   │   ├── pipeline/
-│   │   ├── store/
-│   │   ├── search.py
-│   │   ├── prompts/
-│   │   └── types.py
-│   └── llm.py                    # LLM provider 抽象
-│
 ├── config/
 │   └── default.toml              # vault 路径 / 阈值 / 触发策略
 │
@@ -599,8 +603,15 @@ itsme/
 │   ├── ARCHITECTURE.md           # 本文
 │   └── ROADMAP.md                # 任务分解
 │
-└── tests/
+├── tests/                        # pytest
+├── pyproject.toml                # hatchling 构建，packages = ["src/itsme"]
+└── README.md
 ```
+
+**为什么 src-layout：**
+- `mcp` 是 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) 的顶级包名。如果我们仓库根直接放 `mcp/`，运行时会 shadow 掉 SDK，本地 `import mcp.server.fastmcp` 拿不到 SDK。
+- src-layout 让 `itsme.mcp.*`（我们）和 `mcp.*`（SDK）命名空间完全隔离。
+- 同时强制开发者必须 `pip install -e .` 才能 import，避免 "在 repo 根跑 pytest 隐式用上未发布代码" 的常见坑。
 
 ---
 
