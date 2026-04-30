@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit configuration for itsme
+# Docs: https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+language: zh-CN
+
+early_access: false
+
+reviews:
+  profile: chill                   # 别太啰嗦，关掉 nitpick 噪音
+  high_level_summary: true         # PR 级 summary 留着
+  poem: false                      # 不要那个无聊的诗
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false                  # draft PR 不审，免得早期改动太频繁
+    base_branches:
+      - main
+
+  # 针对 itsme 项目特点的路径级评审指令
+  path_instructions:
+    - path: "docs/**"
+      instructions: |
+        本仓库奉行"文档与代码强一致"。
+        - 若 PR 同时改了代码与 docs/ARCHITECTURE.md，确认两者描述对齐
+        - 若 PR 改了代码但没动架构 / roadmap 文档，判断是否应该同步（重大变更必须同步）
+        - 注意 CLAUDE.md "已锁的设计决策"，flag 任何与之冲突的方案
+
+    - path: "**/*.py"
+      instructions: |
+        - 强制 ruff 风格、类型注解（与 mypy strict 兼容）
+        - 警惕：agent 不应直接调用 MemPalace MCP（mp.* 工具）；
+          itsme 对外只暴露 remember/ask/status 三个动词，MemPalace 是内部 SDK
+        - EventBus 事件类型保持窄（只有 6 种 type），新增 type 必须有强理由
+        - hook 不直接 remember()，先写 events 再让 router 消费
+
+    - path: "core/aleph/**"
+      instructions: |
+        Aleph 是进程内"记忆管理员"模块，不依赖 MemPalace。
+        - 检查是否有违反此解耦原则的直接调用
+        - vault 写入必须独占、用户区块需保留
+        - LLM 调用统一走 core/llm.py 的 provider 抽象
+
+    - path: ".github/workflows/**"
+      instructions: |
+        关注 CI 流程稳定性：版本 pin、secret 引用、权限最小化。
+
+  # 不审这些路径
+  path_filters:
+    - "!**/*.lock"
+    - "!**/__pycache__/**"
+    - "!.venv/**"
+
+  # 工具集成（对 Python 友好的全开）— 必须放在 reviews 下
+  tools:
+    ruff:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    gitleaks:
+      enabled: true                # secret 泄漏扫描
+
+chat:
+  auto_reply: true                 # 允许 @coderabbitai 互动

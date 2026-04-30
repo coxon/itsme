@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 最小权限：CI 只需读代码，不写任何东西
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install 'ruff==0.7.4'
+      - name: Lint
+        run: |
+          if [ -f pyproject.toml ]; then
+            ruff check .
+            ruff format --check .
+          else
+            echo "No Python project yet — skipping lint."
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run tests
+        run: |
+          if [ -f pyproject.toml ]; then
+            pip install -e ".[dev]"
+            pytest
+          else
+            echo "No Python project yet — skipping tests."
+          fi

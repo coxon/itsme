@@ -55,7 +55,7 @@ ln -s /path/to/itsme itsme
 ### Hook 脚本契约
 
 每个 hook 脚本：
-- ���收 stdin：JSON envelope（含 session_id、即将丢失的 context、触发原因）
+- 接收 stdin：JSON envelope（含 session_id、即将丢失的 context、触发原因）
 - 退出码 0：成功
 - stdout：可选 JSON（被忽略，仅日志）
 

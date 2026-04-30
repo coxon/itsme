@@ -125,7 +125,7 @@ verbatim · 全量 · 短链            结构化 · 提炼 · 长链
 
 **`promote=true` 的语义（核心新增）：**
 
-> 把 ask 从 *read-only* 升级为 *read + reconsolidate*。这与人脑的"记忆唤起即重新��固（reconsolidation）"同构 —— **每一次提问都是一次记忆的重新组织**。
+> 把 ask 从 *read-only* 升级为 *read + reconsolidate*。这与人脑的"记忆唤起即重新巩固（reconsolidation）"同构 —— **每一次提问都是一次记忆的重新组织**。
 
 **调用是同步的**：调用方等待并行检索 + 融合完成，拿到融合后的答案；副作用是 emit `wiki.promoted` 让 promoter 写回 Aleph。
 
@@ -636,7 +636,7 @@ itsme/
 已解决（移出列表）：
 - ~~Q: Aleph 现状~~ → **从 0 自建（进程内模块）**
 - ~~Q: 实现语言~~ → **Python**
-- ~~Q: `ask(promote=true)` sync vs async~~ → **���步**：并行 fetch + 融合 + 返回，副作用 emit `wiki.promoted`
+- ~~Q: `ask(promote=true)` sync vs async~~ → **同步**：并行 fetch + 融合 + 返回，副作用 emit `wiki.promoted`
 - ~~Q: LLM provider~~ → **v0.0.x 先支持 Anthropic**，provider 抽象层为未来留口
 - ~~Q: Embedding provider~~ → **本地 sentence-transformers**
 - ~~Q: Session 边界识别~~ → **before-exit / before-clear / before-compact**
