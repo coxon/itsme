@@ -19,7 +19,9 @@
 - ✅ Embedding：**本地 sentence-transformers**（v0.0.3 启用）
 - ✅ Hook 触发：**before-exit / before-clear / before-compact**（consolidation 边界，非 per-turn）
 - ✅ 多 IDE：**先支持 CC + Codex**，安装方式分别打包
-- ✅ 仓库管理：**标准 gitflow**（main / develop / feature/* / release/* / hotfix/*）
+- ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
+- ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）
+- ✅ Vault 默认路径：`~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
 
 ---
 
@@ -42,9 +44,9 @@
 ### Tasks
 
 #### P0 — 骨架
-- [ ] **T1.1** 仓库结构落地（按 ARCHITECTURE §9）
-- [ ] **T1.2** `plugin.json` + `manifest.skill.md`，能被 CC 识别
-- [ ] **T1.3** Python 包初始化（`pyproject.toml`、依赖锁、`uv` or `poetry`）
+- [x] **T1.1** 仓库结构落地（按 ARCHITECTURE §9，src-layout）
+- [ ] **T1.2** `plugin.json` 完善（mcpServers 实启）+ `skills/itsme/SKILL.md` 实质内容
+- [x] **T1.3** Python 包初始化（`pyproject.toml`、hatchling、ruff/pytest 配置）
 - [ ] **T1.4** 基础 README（安装方式、3 动词速查、链接到 docs）
 
 #### P0 — EventBus
@@ -210,18 +212,16 @@ T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
 
 ## Pre-flight Checklist
 
-全部已敲定 ✅
-
 - [x] **Q1** Aleph 现状 → **从 0 自建**
 - [x] **Q2** 实现语言 → **Python**
 - [x] **Q3** `ask(promote=true)` → **同步**（并行 fetch + 融合 + 返回）
 - [x] **Q4** LLM provider → **Anthropic**（先支持，留抽象层）
 - [x] **Q5** Embedding → **本地 sentence-transformers**（v0.0.3）
 - [x] **Q6** Hook 触发 → **before-exit / before-clear / before-compact**
-- [ ] **Q7** Vault 默认路径 → 建议 `~/.itsme/aleph-vault/`，**待你确认**
+- [x] **Q7** Vault 默认路径 → `~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
 - [x] **Q8** Plugin 安装 → **CC + Codex 双套**，分别按各自规范打包
 
-剩下唯一一个待决：**Q7 vault 路径**。
+全部已敲定 ✅
 
 ---
 
