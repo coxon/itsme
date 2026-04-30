@@ -18,7 +18,7 @@ feature/*       ─●─●────●──┘    ●──●─┘      
 
 - ❌ **禁止直接 commit/push 到 `main`**
 - ✅ 任何变更必须走 `feature/*` 分支 + Pull Request
-- ✅ PR 必须经过 review（自评或 Claude bot 评审）才能合并
+- ✅ PR 必须经过 review（自评或 CodeRabbit 评审）才能合并
 - ✅ 合并到 main 推荐 **squash & merge**，保持主线线性
 
 > **本规则由三层强制：**
@@ -79,7 +79,7 @@ git push -u origin feature/events-ringbuf
 # 4. 开 PR → main
 gh pr create --base main --title "feat(events): ring buffer" --body "..."
 
-# 5. 等 review / Claude bot 评，绿后 squash merge
+# 5. 等 review / CodeRabbit 评，绿后 squash merge
 
 # 6. 删分支（远端会在合并后自动删，本地手动）
 git checkout main && git pull && git branch -d feature/events-ringbuf
