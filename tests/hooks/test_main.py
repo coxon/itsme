@@ -179,3 +179,40 @@ def test_context_pressure_routes_to_handler(tmp_path: Path, isolated_db: Path) -
         assert events[0].source == "hook:context-pressure"
     finally:
         bus.close()
+
+
+def test_disabled_env_short_circuits_before_bus_open(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With HOOKS_DISABLED=1, an unwritable DB path must NOT cause stderr noise.
+
+    Regression for CodeRabbit PR#7 r1: previously ``open_bus()`` ran
+    before the disable check, so a disabled user with a bad db path
+    still saw "failed to open events ring" on every hook tick.
+    """
+    # Make the parent unwritable so any attempt to open would fail.
+    unwritable_parent = tmp_path / "locked"
+    unwritable_parent.mkdir()
+    unwritable_parent.chmod(0o000)
+    try:
+        stdin = json.dumps(
+            {
+                "session_id": "sess-1",
+                "transcript_path": str(tmp_path / "missing.jsonl"),
+                "cwd": "/tmp",
+                "hook_event_name": "SessionEnd",
+            }
+        )
+        rc = _run_hook(
+            "before-exit",
+            stdin=stdin,
+            db_path=unwritable_parent / "blocked.db",
+            state_dir=tmp_path / "state",
+            extra_env={"ITSME_HOOKS_DISABLED": "1"},
+        )
+        assert rc == 0
+        # No "failed to open events ring" spam.
+        err = capsys.readouterr().err
+        assert "failed to open events ring" not in err
+    finally:
+        unwritable_parent.chmod(0o755)

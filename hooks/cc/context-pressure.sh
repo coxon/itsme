@@ -3,4 +3,4 @@
 # Wired to both UserPromptSubmit and PostToolUse in hooks.json;
 # same command, debounce state ensures we don't over-capture.
 set -u
-python3 -m itsme.hooks context-pressure
+python -m itsme.hooks context-pressure

@@ -63,6 +63,14 @@ def main(argv: list[str] | None = None) -> int:
 
     stdin_text = sys.stdin.read()
 
+    # Short-circuit the disabled flag BEFORE touching the events ring.
+    # Otherwise a user who sets ITSME_HOOKS_DISABLED=1 *and* has an
+    # unwritable db path still gets stderr spam from open_bus().
+    if _common.hooks_disabled():
+        json.dump(_common.ok_output(), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+
     # Open bus lazily — if the ring db path isn't writable we log and
     # exit 0 so the hook doesn't surface as a UI error.
     try:
@@ -82,7 +90,13 @@ def main(argv: list[str] | None = None) -> int:
         traceback.print_exc(file=sys.stderr)
         return 0
     finally:
-        bus.close()
+        # Close must not escape: CC treats non-zero exits as UI errors,
+        # and a SQLite WAL checkpoint failure here would otherwise mask
+        # the ``return 0`` above.
+        try:
+            bus.close()
+        except Exception as exc:  # pragma: no cover - process-edge barrier
+            print(f"itsme hook {name}: failed to close events ring: {exc}", file=sys.stderr)
 
     json.dump(out, sys.stdout)
     sys.stdout.write("\n")

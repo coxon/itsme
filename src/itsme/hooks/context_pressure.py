@@ -192,6 +192,25 @@ def run_context_pressure(
     resolved_max = (
         max_tokens if max_tokens is not None else _env_int("ITSME_CTX_MAX", DEFAULT_MAX_TOKENS)
     )
+    # Range-validate before we act. Bad env values — e.g. "70" (meant
+    # as %), "1.2" (>100%), "-1" — would otherwise either fire every
+    # tick or never fire, silently breaking the debounce contract.
+    # Fall back to defaults with a warning instead of failing loudly;
+    # this is a hook, not an MCP call.
+    if not 0.0 <= resolved_threshold <= 1.0:
+        _logger.warning(
+            "itsme: ITSME_CTX_THRESHOLD=%r out of [0, 1]; falling back to %s",
+            resolved_threshold,
+            DEFAULT_THRESHOLD,
+        )
+        resolved_threshold = DEFAULT_THRESHOLD
+    if disarm_drop < 0.0:
+        _logger.warning(
+            "itsme: disarm_drop=%r must be non-negative; falling back to %s",
+            disarm_drop,
+            DEFAULT_DISARM_DROP,
+        )
+        disarm_drop = DEFAULT_DISARM_DROP
     if resolved_max <= 0:
         return _common.ok_output()
 

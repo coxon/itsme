@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,8 +21,18 @@ from itsme.hooks.context_pressure import (
 
 
 @pytest.fixture
-def bus(tmp_path: Path) -> EventBus:
-    return EventBus(db_path=tmp_path / "events.db")
+def bus(tmp_path: Path) -> Iterator[EventBus]:
+    """Throwaway event bus rooted in pytest's tmp_path.
+
+    Yields so the teardown closes the SQLite connection — leaked
+    handles make Windows cleanups flaky and skip the close path from
+    coverage.
+    """
+    ring = EventBus(db_path=tmp_path / "events.db")
+    try:
+        yield ring
+    finally:
+        ring.close()
 
 
 @pytest.fixture
@@ -232,3 +243,67 @@ def test_disarm_drop_default_is_used(tmp_path: Path, bus: EventBus, state_dir: P
     # If the default were 0, even tiny dips would re-arm; this test
     # asserts a real shoulder exists so back-to-back capture spam is
     # impossible in practice.
+
+
+def test_threshold_above_one_falls_back_to_default(
+    tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A threshold of 1.2 (user confused % vs fraction) must not silently break."""
+    transcript = tmp_path / "t.jsonl"
+    _transcript(transcript, chars=4000)  # 1000 tokens / 10000 = 10%
+
+    with caplog.at_level("WARNING"):
+        run_context_pressure(
+            _stdin(transcript),
+            bus=bus,
+            state_dir=state_dir,
+            threshold=1.2,  # bogus
+            max_tokens=10_000,
+        )
+
+    # Default (0.70) kicks in; 10% pressure is well below, no fire.
+    assert bus.count() == 0
+    assert any("out of [0, 1]" in msg for msg in caplog.messages)
+
+
+def test_threshold_below_zero_falls_back_to_default(
+    tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Negative threshold should also fall back rather than fire every tick."""
+    transcript = tmp_path / "t.jsonl"
+    _transcript(transcript, chars=40)  # tiny: 10 tokens
+
+    with caplog.at_level("WARNING"):
+        run_context_pressure(
+            _stdin(transcript),
+            bus=bus,
+            state_dir=state_dir,
+            threshold=-0.1,
+            max_tokens=10_000,
+        )
+
+    assert bus.count() == 0
+    assert any("out of [0, 1]" in msg for msg in caplog.messages)
+
+
+def test_negative_disarm_drop_falls_back_to_default(
+    tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Negative disarm_drop would break the re-arm guard; clamp back."""
+    transcript = tmp_path / "t.jsonl"
+    _transcript(transcript, chars=4000)
+
+    with caplog.at_level("WARNING"):
+        # Fire once, using the valid threshold path.
+        run_context_pressure(
+            _stdin(transcript),
+            bus=bus,
+            state_dir=state_dir,
+            threshold=0.05,
+            max_tokens=10_000,
+            disarm_drop=-0.5,
+        )
+
+    # Warning logged; behaviour matches default (did fire since initial armed).
+    assert any("disarm_drop" in msg for msg in caplog.messages)
+    assert bus.count() == 1

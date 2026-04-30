@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,9 +15,18 @@ from itsme.hooks.lifecycle import run_lifecycle_hook
 
 
 @pytest.fixture
-def bus(tmp_path: Path) -> EventBus:
-    """Throwaway event bus rooted in pytest's tmp_path."""
-    return EventBus(db_path=tmp_path / "events.db")
+def bus(tmp_path: Path) -> Iterator[EventBus]:
+    """Throwaway event bus rooted in pytest's tmp_path.
+
+    Yields so the teardown can close the SQLite connection; the
+    ``return``-style fixture we had before leaked handles and made the
+    WAL checkpoint path untested.
+    """
+    ring = EventBus(db_path=tmp_path / "events.db")
+    try:
+        yield ring
+    finally:
+        ring.close()
 
 
 def _make_transcript(path: Path, messages: list[str]) -> None:
