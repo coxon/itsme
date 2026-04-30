@@ -17,7 +17,7 @@
 - ✅ `ask(promote=true)`：**同步**（并行 fetch + 融合 + 返回，副作用写回）
 - ✅ LLM provider：**Anthropic**（v0.0.x 先支持，provider 抽象层为未来留口）
 - ✅ Embedding：**本地 sentence-transformers**（v0.0.3 启用）
-- ✅ Hook 触发：**被动 lifecycle**（SessionEnd / PreCompact）+ **主动 context-pressure**（UserPromptSubmit / PostToolUse，阈值采样 + Schmitt-trigger debounce）
+- ✅ Hook 触发：**被动 lifecycle**（SessionEnd=before-exit / PreCompact=before-compact）+ **主动 context-pressure**（UserPromptSubmit / PostToolUse，阈值采样 + Schmitt-trigger debounce）
 - ✅ 多 IDE：**先支持 CC + Codex**，安装方式分别打包
 - ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
 - ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）

@@ -241,11 +241,50 @@ def test_pressure_state_round_trip() -> None:
 
 
 def test_disarm_drop_default_is_used(tmp_path: Path, bus: EventBus, state_dir: Path) -> None:
-    """When caller omits disarm_drop, the module default applies."""
+    """Omitting ``disarm_drop`` ⇒ DEFAULT_DISARM_DROP (0.10) actually applies.
+
+    Behavioural — not just a constant guard. Fires once at 80%, then:
+    a 9% drop must NOT re-arm (boundary not yet reached), an 11% drop
+    MUST re-arm. Catches a regression where the parameter default was
+    silently wired to something else.
+    """
     assert DEFAULT_DISARM_DROP == 0.10  # guard against silent change
-    # If the default were 0, even tiny dips would re-arm; this test
-    # asserts a real shoulder exists so back-to-back capture spam is
-    # impossible in practice.
+
+    transcript = tmp_path / "t.jsonl"
+
+    # Fire once at 80% — last_triggered = 0.8, disarmed.
+    _transcript(transcript, chars=32_000)  # 8000 / 10000 = 80%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.50,
+        max_tokens=10_000,
+        # disarm_drop omitted — must use DEFAULT_DISARM_DROP (0.10).
+    )
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is False
+
+    # Drop to 71% (8000-71% = 0.09 drop, just under 0.10): stay disarmed.
+    _transcript(transcript, chars=28_400)  # 7100 / 10000 = 71%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.50,
+        max_tokens=10_000,
+    )
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is False
+
+    # Drop to 69% (0.11 drop, ≥0.10): re-arm.
+    _transcript(transcript, chars=27_600)  # 6900 / 10000 = 69%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.50,
+        max_tokens=10_000,
+    )
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is True
 
 
 def test_threshold_above_one_falls_back_to_default(
