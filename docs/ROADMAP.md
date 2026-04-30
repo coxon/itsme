@@ -76,6 +76,7 @@
 
 #### P0 — Hook
 - [ ] **T1.17** CC hook 脚本：`hooks/cc/before-exit`、`before-clear`、`before-compact`（最小：把待丢失上下文塞进 events as `raw.captured`，标 `source=hook:before-<x>`）
+- [ ] **T1.17b** **Context-pressure hook**（主动式）：CC `UserPromptSubmit` / `PostToolUse` 触发，读 `transcript_path` 估 tokens（`chars/4`），跨阈值（默认 0.70，可配 `$ITSME_CTX_THRESHOLD`）emit `raw.captured` with `source=hook:context-pressure`。**debounce**：上次触发后 pressure 需跌 >10% 才再发（防抖）。比 `before-compact` 早，抢救窗口大（v0.0.2 由 Aleph promoter 消费）。
 - [ ] **T1.18** Codex hook 适配（先调研 Codex 的 hook 接口，按其规范实现）
 - [ ] **T1.19** hook 与 explicit remember 的去重标记
 
@@ -222,7 +223,7 @@ T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
 - [x] **Q3** `ask(promote=true)` → **同步**（并行 fetch + 融合 + 返回）
 - [x] **Q4** LLM provider → **Anthropic**（先支持，留抽象层）
 - [x] **Q5** Embedding → **本地 sentence-transformers**（v0.0.3）
-- [x] **Q6** Hook 触发 → **before-exit / before-clear / before-compact**
+- [x] **Q6** Hook 触发 → **被动 lifecycle 3 个**（before-exit / before-clear / before-compact）+ **主动 context-pressure 1 个**（阈值采样，debounce；T1.17b）
 - [x] **Q7** Vault 默认路径 → `~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
 - [x] **Q8** Plugin 安装 → **CC + Codex 双套**，分别按各自规范打包
 
