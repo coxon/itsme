@@ -16,7 +16,8 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo "   Per CONTRIBUTING.md, all changes must go through a"
     echo "   feature/* branch and a Pull Request."
     echo ""
-    echo "   To bypass (NOT recommended): git push --no-verify"
+    echo "   Bypassing this hook is only acceptable when explicitly"
+    echo "   authorized for the current task (see CLAUDE.md hard rules)."
     echo ""
     exit 1
   fi

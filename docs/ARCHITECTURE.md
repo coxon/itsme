@@ -125,7 +125,7 @@ verbatim · 全量 · 短链            结构化 · 提炼 · 长链
 
 **`promote=true` 的语义（核心新增）：**
 
-> 把 ask 从 *read-only* 升级为 *read + reconsolidate*。这与人脑的"记忆唤起即重新��固（reconsolidation）"同构 —— **每一次提问都是一次记忆的重新组织**。
+> 把 ask 从 *read-only* 升级为 *read + reconsolidate*。这与人脑的"记忆唤起即重新巩固（reconsolidation）"同构 —— **每一次提问都是一次记忆的重新组织**。
 
 **调用是同步的**：调用方等待并行检索 + 融合完成，拿到融合后的答案；副作用是 emit `wiki.promoted` 让 promoter 写回 Aleph。
 
