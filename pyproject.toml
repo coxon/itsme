@@ -7,7 +7,8 @@ requires-python = ">=3.12"
 authors = [{ name = "coxon" }]
 license = { text = "MIT" }
 dependencies = [
-    # Runtime deps 从 v0.0.1 T1.5+ 开始逐项加（pydantic / mcp SDK / ...）
+    "pydantic>=2.7",
+    "python-ulid>=2.7",
 ]
 
 [project.optional-dependencies]

@@ -25,6 +25,9 @@ def test_subpackages_importable() -> None:
     import itsme.core.adapters  # noqa: F401
     import itsme.core.aleph  # noqa: F401
     import itsme.core.events  # noqa: F401
+    import itsme.core.events.bus  # noqa: F401
+    import itsme.core.events.ringbuf  # noqa: F401
+    import itsme.core.events.schema  # noqa: F401
     import itsme.core.llm  # noqa: F401
     import itsme.core.workers  # noqa: F401
     import itsme.mcp  # noqa: F401
