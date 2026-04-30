@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # CodeRabbit configuration for itsme
 # Docs: https://docs.coderabbit.ai/getting-started/configure-coderabbit
 
@@ -51,16 +52,16 @@ reviews:
     - "!**/__pycache__/**"
     - "!.venv/**"
 
+  # 工具集成（对 Python 友好的全开）— 必须放在 reviews 下
+  tools:
+    ruff:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    gitleaks:
+      enabled: true                # secret 泄漏扫描
+
 chat:
   auto_reply: true                 # 允许 @coderabbitai 互动
-
-# 工具集成（对 Python 友好的全开）
-tools:
-  ruff:
-    enabled: true
-  markdownlint:
-    enabled: true
-  yamllint:
-    enabled: true
-  gitleaks:
-    enabled: true                  # secret 泄漏扫描
