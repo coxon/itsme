@@ -31,9 +31,11 @@ from itsme.core.adapters.naming import room as _room
 from itsme.core.adapters.naming import wing as _wing
 from itsme.core.events import EventBus, EventEnvelope, EventType
 
-# v0.0.1 only honors a single read mode; the others are documented for
-# forward-compat and rejected at the boundary.
-AskMode = Literal["verbatim"]
+# All 4 documented modes are part of the type even though only
+# ``verbatim`` is implemented in v0.0.1 — the others raise
+# :class:`NotImplementedError` at the boundary so the type accepts
+# them and the runtime rejects them with a precise message.
+AskMode = Literal["verbatim", "auto", "wiki", "now"]
 RememberKind = Literal["decision", "fact", "feeling", "todo", "event", "general"]
 StatusScope = Literal["recent", "today", "session"]
 StatusFormat = Literal["json", "feed"]

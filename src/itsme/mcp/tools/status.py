@@ -6,7 +6,7 @@ separated feed string; richer formats (Markdown, OTLP) come later.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 from itsme.core import Memory
 
@@ -47,7 +47,10 @@ def status_handler(
     if limit > MAX_LIMIT:
         raise ValueError(f"limit must be a positive integer and <= {MAX_LIMIT}; got {limit}")
 
-    result = memory.status(scope=scope, limit=limit)  # type: ignore[arg-type]
+    result = memory.status(
+        scope=cast(Literal["recent", "today", "session"], scope),
+        limit=limit,
+    )
 
     if format == "feed":
         lines = [

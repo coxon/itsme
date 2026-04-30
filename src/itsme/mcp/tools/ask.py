@@ -11,7 +11,7 @@ v0.0.1 honors only ``mode='verbatim'``; ``mode='auto'`` and
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 from itsme.core import Memory
 
@@ -50,5 +50,9 @@ def ask_handler(
     if limit > MAX_LIMIT:
         raise ValueError(f"limit must be a positive integer and <= {MAX_LIMIT}; got {limit}")
 
-    result = memory.ask(question=question, mode=mode, limit=limit)  # type: ignore[arg-type]
+    result = memory.ask(
+        question=question,
+        mode=cast(Literal["verbatim", "auto", "wiki", "now"], mode),
+        limit=limit,
+    )
     return result.model_dump(mode="json")

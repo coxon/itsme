@@ -104,8 +104,10 @@ def test_ask_rejects_non_positive_limit(memory: Memory) -> None:
 @pytest.mark.parametrize("mode", ["auto", "wiki", "now"])
 def test_ask_unsupported_modes_raise(memory: Memory, mode: str) -> None:
     """v0.0.1 only implements 'verbatim'."""
+    from typing import Literal, cast
+
     with pytest.raises(NotImplementedError):
-        memory.ask("q", mode=mode)  # type: ignore[arg-type]
+        memory.ask("q", mode=cast(Literal["auto", "wiki", "now"], mode))
 
 
 def test_ask_scopes_to_project_wing_by_default(memory: Memory) -> None:
