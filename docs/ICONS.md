@@ -52,7 +52,7 @@
 
 ### 网格与笔画
 
-```
+```text
 canvas:        24 × 24
 stroke-width:  2px
 stroke-cap:    round
@@ -63,7 +63,7 @@ viewBox:       "0 0 24 24"
 
 ### 颜色
 
-```
+```text
 全部使用 stroke="currentColor"，不写死颜色。
 强调点（如 brand mark 的 dot）才允许 fill="currentColor"。
 ```
@@ -79,7 +79,7 @@ viewBox:       "0 0 24 24"
 
 ## 5. 命名 / 存放
 
-```
+```text
 docs/
 └── assets/
     └── icons/

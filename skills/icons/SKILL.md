@@ -19,7 +19,7 @@ status: active
 
 ## STOP-READ-COPY-EDIT-VERIFY
 
-```
+```text
 1. STOP    — read this whole file before touching SVG.
 2. READ    — open docs/ICONS.md §3 §4 §5.
 3. COPY    — duplicate docs/assets/icons/_template.svg → <scope>-<name>.svg.
@@ -49,7 +49,7 @@ status: active
 
 ## Naming
 
-```
+```text
 docs/assets/icons/<scope>-<name>.svg
 ```
 
@@ -82,7 +82,7 @@ Then propose 1-2 concept sketches **in chat first** before writing files.
 
 After creating one or more icons, end your reply with:
 
-```
+```text
 ✅ Created: <list>
 ✅ Lint: PASS / FAIL (if FAIL, show errors)
 ✅ Preview: docs/assets/icons/README.md updated

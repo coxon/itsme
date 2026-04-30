@@ -7,6 +7,7 @@ Usage:
 
 Exit 0 = all pass · Exit 1 = at least one violation.
 """
+
 from __future__ import annotations
 
 import re
@@ -28,13 +29,21 @@ REQUIRED_ROOT_ATTRS = {
 }
 
 BANNED_ELEMENTS = {
-    "linearGradient", "radialGradient", "filter", "mask",
-    "pattern", "image", "text", "foreignObject", "style",
+    "linearGradient",
+    "radialGradient",
+    "filter",
+    "mask",
+    "pattern",
+    "image",
+    "text",
+    "foreignObject",
+    "style",
 }
 
-NAME_RE = re.compile(r"^(itsme|(brand|engine|verb|hook)-[a-z0-9-]+)\.svg$")
+NAME_RE = re.compile(r"^(itsme|(engine|verb|hook)-[a-z0-9-]+)\.svg$")
 HARD_COLOR_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgb\(|rgba\(|hsl\(")
 ALLOWED_FILLS = {"none", "currentColor"}
+NON_ICON_NAMES = {"_template.svg", "README.md"}
 
 
 def _strip_ns(tag: str) -> str:
@@ -45,12 +54,11 @@ def lint_file(path: Path) -> list[str]:
     errors: list[str] = []
 
     # 1. naming
-    if path.name != "_template.svg" and path.name != "README.md":
-        if not NAME_RE.match(path.name):
-            errors.append(
-                f"name: '{path.name}' violates <scope>-<name>.svg "
-                f"(scope ∈ brand|engine|verb|hook, or 'itsme.svg')"
-            )
+    if path.name not in NON_ICON_NAMES and not NAME_RE.match(path.name):
+        errors.append(
+            f"name: '{path.name}' violates <scope>-<name>.svg "
+            f"(scope ∈ engine|verb|hook, or 'itsme.svg' for brand)"
+        )
 
     # 2. parse
     try:
