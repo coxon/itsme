@@ -105,6 +105,9 @@ def test_fires_when_threshold_crossed(tmp_path: Path, bus: EventBus, state_dir: 
     assert p["tokens_estimated"] == 1000
     assert p["threshold"] == 0.05
     assert p["max_tokens"] == 10_000
+    # Lock transcript_ref contract: a ref to the same file must ride
+    # on the payload so future consumers can re-open the source.
+    assert p["transcript_ref"] == {"path": str(transcript)}
 
     # State persisted, disarmed.
     state = _load_state(_state_path(state_dir, "sess-1"))
