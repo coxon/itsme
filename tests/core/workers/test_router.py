@@ -217,13 +217,19 @@ def test_consume_loop_skips_ignored_sources(env: RouterEnv) -> None:
     assert routed == []
 
 
-def test_consume_loop_dedups_already_routed(env: RouterEnv) -> None:
-    """A raw_event_id already in memory.routed is not re-routed."""
+def test_consume_loop_dedups_via_memory_stored(env: RouterEnv) -> None:
+    """A raw_event_id with a matching memory.stored is not re-routed.
+
+    Dedup keys on ``memory.stored`` (post-write) so a failed write
+    doesn't accidentally mark an envelope as "done".
+    """
     bus, router, _ = env
     raw = _raw(bus, "decided to deploy", source="hook:before-exit")
-    # Pre-route synchronously to seed memory.routed.
+    # Pre-route synchronously to seed both memory.routed AND memory.stored.
     router.route_and_store(raw)
+    pre_stored = bus.tail(n=10, types=[EventType.MEMORY_STORED])
     pre_routed = bus.tail(n=10, types=[EventType.MEMORY_ROUTED])
+    assert len(pre_stored) == 1
     assert len(pre_routed) == 1
 
     async def runner() -> None:
@@ -235,10 +241,79 @@ def test_consume_loop_dedups_already_routed(env: RouterEnv) -> None:
 
     asyncio.run(runner())
 
-    # Loop must not have produced a second memory.routed for the same raw.
+    # Loop must not have produced a second memory.routed/memory.stored.
+    post_stored = bus.tail(n=10, types=[EventType.MEMORY_STORED])
     post_routed = bus.tail(n=10, types=[EventType.MEMORY_ROUTED])
+    assert len(post_stored) == 1
     assert len(post_routed) == 1
-    assert post_routed[0].payload["raw_event_id"] == raw.id
+    assert post_stored[0].payload["raw_event_id"] == raw.id
+
+
+def test_consume_loop_retries_after_write_failure(env: RouterEnv) -> None:
+    """Critical: write failure must NOT poison the envelope.
+
+    Regression for CodeRabbit PR#6 finding — earlier code keyed dedup
+    on ``memory.routed`` (emitted before the adapter write). If
+    ``adapter.write`` raised, the envelope had a routed event but no
+    stored event, yet was incorrectly marked "done" and silently
+    dropped. With dedup keyed on ``memory.stored``, a fresh consume
+    loop on the same bus must successfully retry.
+    """
+    bus, router, adapter = env
+
+    # Seed a hook-style raw.captured.
+    raw = _raw(bus, "today we shipped", source="hook:before-exit")
+
+    # Simulate a transient write failure by swapping the adapter's
+    # ``write`` for one that raises. ``route_and_store`` will emit
+    # memory.routed first, then blow up before memory.stored.
+    original_write = adapter.write
+    adapter.write = lambda **_: (_ for _ in ()).throw(RuntimeError("disk full"))  # type: ignore[method-assign]
+
+    async def first_pass() -> None:
+        stop = asyncio.Event()
+        task = asyncio.create_task(router.consume_loop(stop=stop, poll_interval=0.05))
+        await asyncio.sleep(0.15)
+        stop.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    asyncio.run(first_pass())
+
+    routed_after_fail = bus.tail(n=10, types=[EventType.MEMORY_ROUTED])
+    stored_after_fail = bus.tail(n=10, types=[EventType.MEMORY_STORED])
+    # routed got emitted, stored did NOT (write failed).
+    assert any(e.payload["raw_event_id"] == raw.id for e in routed_after_fail)
+    assert not any(e.payload.get("raw_event_id") == raw.id for e in stored_after_fail)
+
+    # Restore the working adapter and run a fresh consume loop —
+    # simulates a process restart. The envelope must NOT be deduped
+    # (no memory.stored exists for it) and the retry must succeed.
+    adapter.write = original_write  # type: ignore[method-assign]
+
+    async def second_pass() -> None:
+        stop = asyncio.Event()
+        task = asyncio.create_task(router.consume_loop(stop=stop, poll_interval=0.05))
+        await asyncio.sleep(0.15)
+        stop.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    asyncio.run(second_pass())
+
+    stored_final = bus.tail(n=10, types=[EventType.MEMORY_STORED])
+    assert any(
+        e.payload["raw_event_id"] == raw.id for e in stored_final
+    ), "retry must persist the envelope after the write path recovers"
+    # The drawer is searchable now.
+    assert adapter.search("today")
+
+
+def test_initial_cursor_returns_none(env: RouterEnv) -> None:
+    """v0.0.1 simplification: always replay the ring window on boot."""
+    bus, router, _ = env
+    # Even with prior memory.routed events, cursor stays None.
+    raw = _raw(bus, "decided X", source="hook:x")
+    router.route_and_store(raw)
+    assert router._initial_cursor() is None  # noqa: SLF001
 
 
 # -------------------------------------------------------- RouterDecision

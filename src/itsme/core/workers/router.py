@@ -25,7 +25,6 @@ the adapter write succeeds).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -205,10 +204,18 @@ class Router:
         ``explicit`` events have already been routed synchronously by
         :meth:`Memory.remember`, so we don't double-process them.
 
-        The loop tracks already-routed envelopes by walking the
-        ``memory.routed`` events on startup, then advancing a cursor
-        as it consumes. This makes restart safe: a new server doesn't
-        re-route old hook events.
+        Restart-safety story (v0.0.1):
+
+        * On boot we **don't** start from a saved cursor. Instead we
+          replay the entire ring window and dedupe per envelope by
+          asking "has a ``memory.stored`` event already been emitted
+          for *this* raw_event_id?". This makes write failures
+          retryable on restart — losing ``memory.routed`` (which is
+          only an observability log) doesn't poison the queue.
+        * Within a single process lifetime, the cursor advances past
+          every event we look at. A transient ``adapter.write`` failure
+          is therefore **not** retried in-process today; v0.0.2 adds a
+          ``router.failed`` event + retry queue.
 
         Args:
             ignore_sources: Producer prefixes to skip (default
@@ -233,16 +240,22 @@ class Router:
                 cursor = env.id
                 if any(env.source.startswith(prefix) for prefix in ignored):
                     continue
-                # Defensive: a router-poll after restart might re-see
-                # already-routed events. ``_already_routed`` walks
-                # memory.routed payloads to dedupe.
-                if self._already_routed(env.id):
+                # Dedup on *successful persistence*, not on routing.
+                # ``memory.routed`` is logged before the adapter write,
+                # so using it as the dedup key would silently drop
+                # events whose write actually failed.
+                if self._already_stored(env.id):
                     continue
-                # Never kill the loop. In v0.0.1 we just swallow;
-                # v0.0.2 will emit a router.failed event with the
-                # traceback for observability.
-                with contextlib.suppress(Exception):  # pragma: no cover
+                try:
                     self.route_and_store(env)
+                except Exception:  # pragma: no cover
+                    # TODO(v0.0.2): emit a ``router.failed`` event and
+                    # log the traceback. Today we swallow so a single
+                    # bad envelope never kills the worker; the original
+                    # raw.captured stays in the ring and will retry on
+                    # the next process restart (no memory.stored = not
+                    # deduped).
+                    continue
 
             try:
                 if stop is None:
@@ -255,18 +268,29 @@ class Router:
 
     # ---------------------------------------------------------------- helpers
     def _initial_cursor(self) -> str | None:
-        """Resume cursor — newest already-routed raw.captured id, or None."""
-        latest = self._bus.tail(n=1, types=[EventType.MEMORY_ROUTED])
-        if not latest:
-            return None
-        raw_id = latest[0].payload.get("raw_event_id")
-        return raw_id if isinstance(raw_id, str) else None
+        """Always start from the oldest event in the ring window.
 
-    def _already_routed(self, raw_event_id: str) -> bool:
-        """Has a ``memory.routed`` event been emitted for *raw_event_id*?"""
-        # Bounded scan of recent routed events. The ring is small
-        # (default 500) so this is cheap.
-        for env in self._bus.tail(n=200, types=[EventType.MEMORY_ROUTED]):
+        v0.0.1 simplification: instead of persisting a cursor, we let
+        ``_already_stored`` shoulder the dedup work. On restart we
+        re-scan the whole ``raw.captured`` window — which is exactly
+        what we want when the previous run crashed mid-write (the
+        retry path needs that re-scan to even consider the failed
+        envelope).
+        """
+        return None
+
+    def _already_stored(self, raw_event_id: str) -> bool:
+        """Has a ``memory.stored`` event been emitted for *raw_event_id*?
+
+        Used as the consume-loop dedup signal. We deliberately key on
+        ``memory.stored`` (post-write) rather than ``memory.routed``
+        (pre-write) so a failed adapter call doesn't get marked as
+        "done" and silently drop the envelope.
+        """
+        # Bounded scan of recent stored events. Ring is small (default
+        # 500) so this is cheap; we widen to 500 to cover the worst
+        # case where the whole window is back-to-back stores.
+        for env in self._bus.tail(n=500, types=[EventType.MEMORY_STORED]):
             if env.payload.get("raw_event_id") == raw_event_id:
                 return True
         return False
