@@ -50,10 +50,10 @@
 - [ ] **T1.4** 基础 README（安装方式、3 动词速查、链接到 docs）
 
 #### P0 — EventBus
-- [ ] **T1.5** 定义 envelope schema（`core/events/schema.py`，pydantic）
-- [ ] **T1.6** sqlite ring buffer 实现（`core/events/ringbuf.py`，500 条容量可配）
-- [ ] **T1.7** `events.append()` / `events.tail(n)` / `events.consume()` API
-- [ ] **T1.8** ULID 生成、ts 注入
+- [x] **T1.5** 定义 envelope schema（`core/events/schema.py`，pydantic）
+- [x] **T1.6** sqlite ring buffer 实现（`core/events/ringbuf.py`，500 条容量可配）
+- [x] **T1.7** `events.append()` / `events.tail(n)` / `events.consume()` API
+- [x] **T1.8** ULID 生成、ts 注入
 
 #### P0 — MCP Surface
 - [ ] **T1.9** MCP server 入口（`mcp/server.py`，基于 `mcp` Python SDK）
