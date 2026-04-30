@@ -110,17 +110,20 @@ def main() -> None:
         project=_resolve_project(),
         db_path=_resolve_db_path(),
     )
-    # Register the router consume_loop as a background worker so
-    # raw.captured events from hooks (source != 'explicit') get routed
-    # while the MCP request loop stays free.
     scheduler = WorkerScheduler()
-    scheduler.add_worker(memory.consume_loop)
-    scheduler.start()
-
     try:
+        # Register the router consume_loop as a background worker so
+        # raw.captured events from hooks (source != 'explicit') get
+        # routed while the MCP request loop stays free.
+        scheduler.add_worker(memory.consume_loop)
+        scheduler.start()
+
         server = build_server(memory)
         server.run("stdio")
     finally:
+        # ``stop`` is idempotent and a no-op when start() never reached
+        # the alive state, so it's safe to call even if scheduler.start
+        # raised mid-boot.
         scheduler.stop()
         memory.close()
 

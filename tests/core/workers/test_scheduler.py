@@ -121,3 +121,23 @@ def test_stop_cancels_running_tasks() -> None:
     time.sleep(0.05)
     sched.stop(timeout=2)
     assert cancelled.wait(timeout=2)
+
+
+def test_start_raises_runtime_error_when_worker_setup_fails() -> None:
+    """start() must NOT silently succeed when ``_run`` dies pre-``_started.set``.
+
+    Regression for CodeRabbit PR#6 r2 finding — a worker that returns
+    something asyncio refuses (here: ``None`` from a non-async lambda)
+    blows up inside ``loop.create_task(fn())`` before the started
+    event is set. Earlier code ignored ``_started.wait()`` return
+    value and handed the caller a dead scheduler.
+    """
+    sched = WorkerScheduler()
+    # Not a coroutine factory; create_task(None) raises inside _run.
+    sched.add_worker(lambda: None)  # type: ignore[arg-type,return-value]
+
+    with pytest.raises(RuntimeError, match="failed to start") as exc_info:
+        sched.start()
+    # The original TypeError from create_task is chained as ``__cause__``
+    # so operators can diagnose without digging through thread logs.
+    assert isinstance(exc_info.value.__cause__, TypeError)

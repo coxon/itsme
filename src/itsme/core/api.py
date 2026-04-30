@@ -182,19 +182,27 @@ class Memory:
         )
 
     def _latest_stored_event_id(self, raw_event_id: str) -> str:
-        """Find the ``memory.stored`` event the router just emitted.
+        """Find the ``memory.stored`` event matching *raw_event_id*.
 
-        The router emits ``memory.stored`` last, so the newest matching
-        event in the ring is the one we want. If somehow nothing matches
-        (only happens if the bus was concurrently truncated, which the
-        ring buffer doesn't do) we fall back to the most recent
-        ``memory.stored`` to keep the contract non-empty.
+        ``Router.route_and_store`` emits exactly one ``memory.stored``
+        event per successful write, with ``raw_event_id`` in the
+        payload. We scan the full ring window (default 500 entries) so
+        concurrent writes from other producers can't push the match
+        out of view; if it really isn't there the contract has been
+        violated upstream and we raise rather than handing the caller
+        an empty / wrong id.
+
+        Raises:
+            RuntimeError: No matching ``memory.stored`` was found —
+                indicates ``Router.route_and_store`` returned without
+                emitting the post-write ack, which is a bug.
         """
-        recent = self._bus.tail(n=10, types=[EventType.MEMORY_STORED])
-        for env in recent:
+        # Use the bus's full ring capacity (default 500). The router
+        # emits memory.stored last, so a tail walk is O(window).
+        for env in self._bus.tail(n=self._bus.count(), types=[EventType.MEMORY_STORED]):
             if env.payload.get("raw_event_id") == raw_event_id:
                 return env.id
-        return recent[0].id if recent else ""
+        raise RuntimeError(f"router did not emit memory.stored for raw_event_id={raw_event_id!r}")
 
     # ------------------------------------------------------------------ ask
     def ask(

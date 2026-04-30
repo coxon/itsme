@@ -47,6 +47,10 @@ class WorkerScheduler:
         self._tasks: list[asyncio.Task[Any]] = []
         self._started = threading.Event()
         self._stopped = threading.Event()
+        # Captured if ``_run`` blows up before signaling ``_started``,
+        # so ``start()`` can surface a helpful message instead of
+        # leaving an unhandled-thread-exception warning.
+        self._startup_error: BaseException | None = None
 
     def add_worker(self, fn: WorkerFn) -> None:
         """Register a worker callable. Must be added before :meth:`start`."""
@@ -55,20 +59,45 @@ class WorkerScheduler:
         self._workers.append(fn)
 
     def start(self) -> None:
-        """Spawn the background thread and run all workers concurrently."""
+        """Spawn the background thread and run all workers concurrently.
+
+        Raises:
+            RuntimeError: The background thread failed to signal
+                ``_started`` within the boot timeout — usually means a
+                worker raised synchronously inside ``_run`` before the
+                loop could come up.
+        """
         if self._thread is not None:
             raise RuntimeError("scheduler already started")
 
         self._thread = threading.Thread(target=self._run, name="itsme-scheduler", daemon=True)
         self._thread.start()
         # Wait until the loop is running so the caller can submit calls.
-        self._started.wait(timeout=5)
+        # Don't trust a False return + dead thread — that means _run()
+        # blew up before set(); raising here beats handing the caller a
+        # silently broken scheduler.
+        if not self._started.wait(timeout=5):
+            alive = self._thread.is_alive()
+            cause = self._startup_error
+            msg = (
+                f"scheduler failed to start within 5s "
+                f"(thread alive={alive}); check worker setup"
+            )
+            if cause is not None:
+                raise RuntimeError(msg) from cause
+            raise RuntimeError(msg)
 
     def stop(self, timeout: float = 5.0) -> None:
         """Cancel all workers and join the thread.
 
         Idempotent: calling stop on a never-started or already-stopped
         scheduler is a no-op.
+
+        Raises:
+            TimeoutError: ``timeout`` elapsed but the thread is still
+                alive. We deliberately do **not** mark the scheduler
+                stopped in that case so a follow-up ``stop()`` can
+                retry instead of silently masking a leaked thread.
         """
         if self._thread is None or self._stopped.is_set():
             return
@@ -78,6 +107,10 @@ class WorkerScheduler:
                 loop.call_soon_threadsafe(task.cancel)
             loop.call_soon_threadsafe(loop.stop)
         self._thread.join(timeout=timeout)
+        if self._thread.is_alive():
+            raise TimeoutError(
+                f"scheduler thread did not exit within {timeout}s; not marking stopped"
+            )
         self._stopped.set()
 
     # ----------------------------------------------------------- internals
@@ -90,6 +123,13 @@ class WorkerScheduler:
                 self._tasks.append(loop.create_task(fn()))
             self._started.set()
             loop.run_forever()
+        except BaseException as exc:  # noqa: BLE001
+            # Capture so ``start()`` can chain it; if we let the thread
+            # die with an uncaught exception pytest surfaces a noisy
+            # PytestUnhandledThreadExceptionWarning and operators see a
+            # bare traceback in the log without context.
+            if not self._started.is_set():
+                self._startup_error = exc
         finally:
             for task in self._tasks:
                 if not task.done():
