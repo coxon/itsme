@@ -50,9 +50,13 @@ def run_lifecycle_hook(
         The CC hook output dict (``continue=True`` always — hooks must
         not block the IDE on capture failures).
     """
-    payload_in = _common.load_hook_input(stdin_text)
+    # Short-circuit before parsing stdin: a disabled user with malformed
+    # CC input would otherwise still see a ValueError surface in stderr.
+    # The CLI already short-circuits earlier, but direct callers (tests,
+    # future router) get the same guarantee here.
     if _common.hooks_disabled():
         return _common.ok_output()
+    payload_in = _common.load_hook_input(stdin_text)
 
     transcript_path_raw = payload_in.get("transcript_path")
     content = ""

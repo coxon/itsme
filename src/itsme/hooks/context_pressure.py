@@ -74,11 +74,21 @@ class PressureState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PressureState:
-        """Parse from JSON; missing / malformed keys default defensively."""
-        return cls(
-            last_triggered=float(data.get("last_triggered", 0.0)),
-            armed=bool(data.get("armed", True)),
-        )
+        """Parse from JSON; missing / malformed values default defensively.
+
+        State files are tiny, infrequently written, and persist across
+        process restarts — a corrupt one (wrong types after manual edit
+        or partial write) must not disable the hook for the rest of the
+        session. Cast failures fall back to the safe default rather than
+        propagate.
+        """
+        try:
+            return cls(
+                last_triggered=float(data.get("last_triggered", 0.0)),
+                armed=bool(data.get("armed", True)),
+            )
+        except (TypeError, ValueError):
+            return cls()
 
 
 # ------------------------------------------------------------- state IO
@@ -175,9 +185,11 @@ def run_context_pressure(
         Standard CC hook output. ``systemMessage`` set on fire so the
         operator sees "itsme captured at 72%" in the transcript.
     """
-    payload_in = _common.load_hook_input(stdin_text)
+    # Disabled-first: a no-op hook must not raise on malformed stdin.
+    # Mirrors lifecycle.run_lifecycle_hook for consistency across hooks.
     if _common.hooks_disabled():
         return _common.ok_output()
+    payload_in = _common.load_hook_input(stdin_text)
 
     transcript_path_raw = payload_in.get("transcript_path")
     session_id_raw = payload_in.get("session_id")
@@ -224,7 +236,11 @@ def run_context_pressure(
 
     # Disarmed branch: only re-arm, never fire.
     if not state.armed:
-        if pressure < state.last_triggered - disarm_drop:
+        # ``<=`` so a drop of *exactly* ``disarm_drop`` re-arms — matches
+        # the documented "drop ≥ disarm_drop" contract. Strict ``<``
+        # would miss the boundary and leave the hook silently disarmed
+        # one tick longer than intended.
+        if pressure <= state.last_triggered - disarm_drop:
             state.armed = True
             _save_state(state_file, state)
         return _common.ok_output()

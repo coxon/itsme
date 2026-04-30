@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Open bus lazily — if the ring db path isn't writable we log and
     # exit 0 so the hook doesn't surface as a UI error.
+    bus: EventBus | None = None
     try:
         bus = _common.open_bus()
     except Exception as exc:  # pragma: no cover — filesystem edge case
@@ -92,11 +93,14 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # Close must not escape: CC treats non-zero exits as UI errors,
         # and a SQLite WAL checkpoint failure here would otherwise mask
-        # the ``return 0`` above.
-        try:
-            bus.close()
-        except Exception as exc:  # pragma: no cover - process-edge barrier
-            print(f"itsme hook {name}: failed to close events ring: {exc}", file=sys.stderr)
+        # the ``return 0`` above. Guard against ``bus is None`` so a
+        # future refactor that lets the open path skip assignment can't
+        # raise UnboundLocalError on the way out.
+        if bus is not None:
+            try:
+                bus.close()
+            except Exception as exc:  # pragma: no cover - process-edge barrier
+                print(f"itsme hook {name}: failed to close events ring: {exc}", file=sys.stderr)
 
     json.dump(out, sys.stdout)
     sys.stdout.write("\n")

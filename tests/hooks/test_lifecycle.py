@@ -158,3 +158,18 @@ def test_invalid_stdin_raises_value_error(bus: EventBus) -> None:
         run_lifecycle_hook("", bus=bus, source="hook:before-exit")
     with pytest.raises(ValueError):
         run_lifecycle_hook("not json", bus=bus, source="hook:before-exit")
+
+
+def test_disabled_short_circuits_before_parsing_stdin(bus: EventBus) -> None:
+    """When disabled, even garbage stdin must not raise.
+
+    Regression for CodeRabbit PR#7 r3: previously load_hook_input ran
+    before the disable check, so a disabled caller with bad input still
+    saw a ValueError surface even though the hook should have been a
+    no-op. CLI path was already safe; direct callers (tests, future
+    router) get the same guarantee here.
+    """
+    with patch.dict(os.environ, {"ITSME_HOOKS_DISABLED": "1"}):
+        out = run_lifecycle_hook("not json at all", bus=bus, source="hook:before-exit")
+    assert out["continue"] is True
+    assert bus.count() == 0

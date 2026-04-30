@@ -310,3 +310,51 @@ def test_negative_disarm_drop_falls_back_to_default(
     # Warning logged; behaviour matches default (did fire since initial armed).
     assert any("disarm_drop" in msg for msg in caplog.messages)
     assert bus.count() == 1
+
+
+def test_pressure_state_from_corrupt_dict_uses_defaults() -> None:
+    """A type-mangled state file (manual edit, partial write) must
+    NOT propagate ValueError — the hook would otherwise stay disabled
+    for the rest of the session."""
+    bad = PressureState.from_dict({"last_triggered": "not-a-float", "armed": True})
+    assert bad == PressureState()  # safe defaults
+    bad2 = PressureState.from_dict({"last_triggered": None, "armed": False})
+    assert bad2 == PressureState()
+
+
+def test_rearm_at_exact_disarm_drop_boundary(
+    tmp_path: Path, bus: EventBus, state_dir: Path
+) -> None:
+    """A drop of *exactly* disarm_drop re-arms — boundary inclusive.
+
+    Regression for CodeRabbit PR#7 r3: previously the disarmed branch
+    used strict ``<`` so an exact 10% relief stayed disarmed for one
+    extra tick, contradicting the documented ≥10% contract.
+    """
+    transcript = tmp_path / "t.jsonl"
+
+    # Fire once at 80%.
+    _transcript(transcript, chars=32_000)  # 8000 / 10000 = 80%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.50,
+        max_tokens=10_000,
+        disarm_drop=0.20,  # boundary at 60% exact
+    )
+    assert bus.count() == 1
+
+    # Drop to *exactly* 60% (80% - 20%): must re-arm.
+    _transcript(transcript, chars=24_000)  # 6000 / 10000 = 60%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.50,
+        max_tokens=10_000,
+        disarm_drop=0.20,
+    )
+    from itsme.hooks.context_pressure import _load_state, _state_path
+
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is True
