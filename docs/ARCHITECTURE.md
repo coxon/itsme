@@ -636,7 +636,7 @@ itsme/
 已解决（移出列表）：
 - ~~Q: Aleph 现状~~ → **从 0 自建（进程内模块）**
 - ~~Q: 实现语言~~ → **Python**
-- ~~Q: `ask(promote=true)` sync vs async~~ → **���步**：并行 fetch + 融合 + 返回，副作用 emit `wiki.promoted`
+- ~~Q: `ask(promote=true)` sync vs async~~ → **同步**：并行 fetch + 融合 + 返回，副作用 emit `wiki.promoted`
 - ~~Q: LLM provider~~ → **v0.0.x 先支持 Anthropic**，provider 抽象层为未来留口
 - ~~Q: Embedding provider~~ → **本地 sentence-transformers**
 - ~~Q: Session 边界识别~~ → **before-exit / before-clear / before-compact**
