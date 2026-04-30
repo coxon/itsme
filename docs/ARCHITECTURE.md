@@ -651,12 +651,12 @@ itsme/                            # git repo root
 - ~~Q: LLM provider~~ → **v0.0.x 先支持 Anthropic**，provider 抽象层为未来留口
 - ~~Q: Embedding provider~~ → **本地 sentence-transformers**
 - ~~Q: Session 边界识别~~ → **before-exit / before-clear / before-compact**
+- ~~Q: Vault 默认路径~~ → **`~/Documents/itsme/`**（与现有 `~/Documents/Aleph/` 同级，见 ROADMAP Q7）
 
 待定：
 
 1. **Wiki entry 类型集**（person/project/decision/concept/place/event）是否够用，是否需要预留扩展机制
 2. **Aleph confidence 字段**的来源：LLM 自评 vs 来源数量启发式 vs 完全省略
 3. **Codex 的 hook 名映射**：CC 是 `before-*`，Codex 对应叫什么？需调研
-4. **Vault 默认路径**：`~/.itsme/aleph-vault/` vs `~/Documents/itsme-vault/` vs 用户自定
-5. **Plugin 安装契约**：CC 用 `plugin install`，Codex 安装方式是什么？是否需要打成两个 artifact？
+4. **Plugin 安装契约**：CC 用 `plugin install`，Codex 安装方式是什么？是否需要打成两个 artifact？
 
