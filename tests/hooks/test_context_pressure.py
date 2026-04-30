@@ -290,22 +290,29 @@ def test_disarm_drop_default_is_used(tmp_path: Path, bus: EventBus, state_dir: P
 def test_threshold_above_one_falls_back_to_default(
     tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A threshold of 1.2 (user confused % vs fraction) must not silently break."""
+    """A threshold of 1.2 (user confused % vs fraction) must not silently break.
+
+    Transcript is sized into the gap between default (0.70) and the
+    bogus threshold (1.20) — 80% pressure. If the fallback works, the
+    hook fires (80% > 0.70); if it doesn't, 80% < 1.20 so we'd stay
+    silent. This is the only transcript shape that can *distinguish*
+    the two outcomes.
+    """
     transcript = tmp_path / "t.jsonl"
-    _transcript(transcript, chars=4000)  # 1000 tokens / 10000 = 10%
+    _transcript(transcript, chars=32_000)  # 8000 tokens / 10000 = 80%
 
     with caplog.at_level("WARNING"):
         run_context_pressure(
             _stdin(transcript),
             bus=bus,
             state_dir=state_dir,
-            threshold=1.2,  # bogus
+            threshold=1.2,  # bogus — falls back to 0.70
             max_tokens=10_000,
         )
 
-    # Default (0.70) kicks in; 10% pressure is well below, no fire.
-    assert bus.count() == 0
     assert any("out of [0, 1]" in msg for msg in caplog.messages)
+    # Fallback to default 0.70 means 80% > threshold → fire.
+    assert bus.count() == 1
 
 
 def test_threshold_below_zero_falls_back_to_default(
@@ -331,12 +338,21 @@ def test_threshold_below_zero_falls_back_to_default(
 def test_negative_disarm_drop_falls_back_to_default(
     tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Negative disarm_drop would break the re-arm guard; clamp back."""
+    """Negative disarm_drop falls back to default 0.10, *and* the
+    re-arm boundary actually uses 0.10 — not the raw bogus value.
+
+    Distinguisher: fire at 20%, drop to 15% (only 5% relief). With
+    raw ``-0.5`` the re-arm boundary would be ``0.20 - (-0.5) = 0.70``,
+    so any pressure below 70% re-arms — i.e. 15% would re-arm
+    immediately. With clamped default 0.10 the boundary is ``0.20 -
+    0.10 = 0.10``, so 15% (above 10%) must NOT re-arm. Asserting
+    ``armed is False`` after the second tick proves the fallback
+    semantics, not just the warning log.
+    """
     transcript = tmp_path / "t.jsonl"
-    _transcript(transcript, chars=4000)
+    _transcript(transcript, chars=8000)  # 2000 / 10000 = 20%
 
     with caplog.at_level("WARNING"):
-        # Fire once, using the valid threshold path.
         run_context_pressure(
             _stdin(transcript),
             bus=bus,
@@ -346,17 +362,37 @@ def test_negative_disarm_drop_falls_back_to_default(
             disarm_drop=-0.5,
         )
 
-    # Warning logged; behaviour matches default (did fire since initial armed).
     assert any("disarm_drop" in msg for msg in caplog.messages)
     assert bus.count() == 1
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is False
+
+    # Drop to 15% — would re-arm under raw -0.5, must stay disarmed
+    # under default 0.10.
+    _transcript(transcript, chars=6000)  # 1500 / 10000 = 15%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.05,
+        max_tokens=10_000,
+        disarm_drop=-0.5,
+    )
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is False
 
 
 def test_disarm_drop_above_one_falls_back_to_default(
     tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """disarm_drop > 1 would make re-arm impossible — clamp back."""
+    """``disarm_drop > 1`` would make re-arm impossible — clamp back.
+
+    Distinguisher: fire at 20%, drop to 5%. With raw ``1.5`` the
+    boundary is ``0.20 - 1.5 = -1.30``, so re-arm requires negative
+    pressure (impossible) — would stay disarmed forever. With default
+    0.10 the boundary is ``0.20 - 0.10 = 0.10``, so 5% (≤ 10%) re-arms.
+    Asserting ``armed is True`` after the second tick proves fallback.
+    """
     transcript = tmp_path / "t.jsonl"
-    _transcript(transcript, chars=4000)
+    _transcript(transcript, chars=8000)  # 20%
 
     with caplog.at_level("WARNING"):
         run_context_pressure(
@@ -365,20 +401,37 @@ def test_disarm_drop_above_one_falls_back_to_default(
             state_dir=state_dir,
             threshold=0.05,
             max_tokens=10_000,
-            disarm_drop=1.5,  # bogus — >100%
+            disarm_drop=1.5,
         )
 
     assert any("disarm_drop" in msg and "out of [0, 1]" in msg for msg in caplog.messages)
-    # Default kicks in, hook still fires once since we're armed.
     assert bus.count() == 1
+
+    # Drop to 5% — under raw 1.5 we'd never re-arm; under default 0.10 we do.
+    _transcript(transcript, chars=2000)  # 500 / 10000 = 5%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.05,
+        max_tokens=10_000,
+        disarm_drop=1.5,
+    )
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is True
 
 
 def test_disarm_drop_nan_falls_back_to_default(
     tmp_path: Path, bus: EventBus, state_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """NaN disarm_drop latches the disarmed branch forever — reject."""
+    """NaN disarm_drop latches the disarmed branch forever — reject + fall back.
+
+    Distinguisher: fire at 20%, drop to 5%. NaN poisons every ``<=``
+    comparison (returns False), so re-arm is *impossible* without
+    fallback. With clamped default 0.10 the boundary is 10% and 5%
+    re-arms. ``armed is True`` proves the fallback semantics ran.
+    """
     transcript = tmp_path / "t.jsonl"
-    _transcript(transcript, chars=4000)
+    _transcript(transcript, chars=8000)  # 20%
 
     with caplog.at_level("WARNING"):
         run_context_pressure(
@@ -392,6 +445,17 @@ def test_disarm_drop_nan_falls_back_to_default(
 
     assert any("non-finite" in msg for msg in caplog.messages)
     assert bus.count() == 1
+
+    _transcript(transcript, chars=2000)  # 5%
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.05,
+        max_tokens=10_000,
+        disarm_drop=float("nan"),
+    )
+    assert _load_state(_state_path(state_dir, "sess-1")).armed is True
 
 
 def test_pressure_state_from_corrupt_dict_uses_defaults() -> None:
