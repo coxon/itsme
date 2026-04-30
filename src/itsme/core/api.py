@@ -156,6 +156,10 @@ class Memory:
 
         Raises:
             ValueError: *content* is empty or whitespace-only.
+            RuntimeError: ``Router.route_and_store`` succeeded but
+                ``_latest_stored_event_id`` couldn't find the matching
+                ``memory.stored`` event — indicates an upstream
+                contract violation in the router/adapter chain.
         """
         if not content.strip():
             raise ValueError("remember(content=...) must be non-empty")
@@ -334,9 +338,11 @@ class Memory:
 
         Used by ``itsme.mcp.server`` to register a background worker
         with the :class:`WorkerScheduler`. The loop reads
-        ``raw.captured`` events whose source is **not** in
-        *ignore_sources* (default: ``("explicit",)`` so the sync
-        fast-path is not double-processed).
+        ``raw.captured`` events whose ``source`` does **not** start
+        with any prefix in *ignore_sources* (default: ``("explicit",)``
+        so the sync fast-path is not double-processed). Note this is
+        prefix matching via ``str.startswith``, not exact membership —
+        ``"explicit"`` will skip ``"explicit"`` *and* ``"explicit:cli"``.
         """
         return self._router.consume_loop(
             ignore_sources=ignore_sources,

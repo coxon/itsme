@@ -200,9 +200,11 @@ class Router:
         """Poll the bus for unrouted ``raw.captured`` events forever.
 
         Designed to live inside :class:`WorkerScheduler`. The loop
-        skips events whose source is in *ignore_sources* — by default
-        ``explicit`` events have already been routed synchronously by
-        :meth:`Memory.remember`, so we don't double-process them.
+        skips events whose ``source`` starts with any prefix in
+        *ignore_sources* — by default ``explicit`` events have
+        already been routed synchronously by :meth:`Memory.remember`,
+        so we don't double-process them. Prefix matching means
+        ``"explicit"`` skips both ``"explicit"`` and ``"explicit:cli"``.
 
         Restart-safety story (v0.0.1):
 
