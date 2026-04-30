@@ -37,11 +37,12 @@ def status_handler(
         ``feed`` key containing a multi-line string. Either way the
         return type is JSON-serialisable for MCP transport.
     """
-    if scope not in {"recent", "today", "session"}:
+    if not isinstance(scope, str) or scope not in {"recent", "today", "session"}:
         raise ValueError(f"scope must be 'recent' / 'today' / 'session'; got {scope!r}")
-    if format not in {"json", "feed"}:
+    if not isinstance(format, str) or format not in {"json", "feed"}:
         raise ValueError(f"format must be 'json' or 'feed'; got {format!r}")
-    if not isinstance(limit, int) or limit <= 0:
+    # bool is a subclass of int — reject it so ``limit=True`` isn't accepted.
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("limit must be a positive integer")
     if limit > MAX_LIMIT:
         raise ValueError(f"limit must be a positive integer and <= {MAX_LIMIT}; got {limit}")

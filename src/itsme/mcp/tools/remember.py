@@ -33,7 +33,7 @@ def remember_handler(
         raise ValueError("content must be a non-empty string")
 
     valid_kinds = {"decision", "fact", "feeling", "todo", "event"}
-    if kind is not None and kind not in valid_kinds:
+    if kind is not None and (not isinstance(kind, str) or kind not in valid_kinds):
         raise ValueError(f"kind must be one of {sorted(valid_kinds)} or omitted; got {kind!r}")
 
     result = memory.remember(content=content, kind=kind)  # type: ignore[arg-type]

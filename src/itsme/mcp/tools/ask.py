@@ -41,9 +41,11 @@ def ask_handler(
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string")
 
-    if mode not in {"verbatim", "auto", "wiki", "now"}:
+    if not isinstance(mode, str) or mode not in {"verbatim", "auto", "wiki", "now"}:
         raise ValueError(f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}")
-    if not isinstance(limit, int) or limit <= 0:
+    # bool is a subclass of int in Python — reject it explicitly so
+    # ``limit=True`` doesn't silently mean "1 hit".
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("limit must be a positive integer")
     if limit > MAX_LIMIT:
         raise ValueError(f"limit must be a positive integer and <= {MAX_LIMIT}; got {limit}")

@@ -136,3 +136,28 @@ def test_status_handler_rejects_oversized_limit(memory: Memory) -> None:
 
     with pytest.raises(ValueError, match=str(MAX_LIMIT)):
         status_handler(memory, limit=MAX_LIMIT + 1)
+
+
+# --------------------------------------------------------- defensive type checks
+def test_ask_handler_rejects_unhashable_mode(memory: Memory) -> None:
+    """mode=[] must ValueError, not TypeError on the set membership check."""
+    with pytest.raises(ValueError, match="mode"):
+        ask_handler(memory, question="q", mode=[])  # type: ignore[arg-type]
+
+
+def test_ask_handler_rejects_bool_limit(memory: Memory) -> None:
+    """``limit=True`` is a programming error, not '1 hit'."""
+    with pytest.raises(ValueError, match="limit"):
+        ask_handler(memory, question="q", limit=True)
+
+
+def test_status_handler_rejects_bool_limit(memory: Memory) -> None:
+    """``limit=True`` is a programming error, not '1 event'."""
+    with pytest.raises(ValueError, match="limit"):
+        status_handler(memory, limit=True)
+
+
+def test_remember_handler_rejects_non_string_kind(memory: Memory) -> None:
+    """``kind=123`` is a programming error, not silent fall-through."""
+    with pytest.raises(ValueError, match="kind"):
+        remember_handler(memory, content="x", kind=123)  # type: ignore[arg-type]
