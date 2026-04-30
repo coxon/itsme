@@ -1,0 +1,366 @@
+"""Internal SDK — `Memory` orchestrator (ARCHITECTURE §4, §6).
+
+The MCP tool surface is **thin** — argument validation only.  All real
+work happens here: emit events, talk to adapters, return structured
+results.  This way the same orchestrator is reachable from MCP tools,
+hooks, and tests without a tool-protocol roundtrip.
+
+v0.0.1 contract (matches ROADMAP T1.10–T1.12):
+
+* :meth:`Memory.remember` — fast-path write to MemPalace, no router yet.
+* :meth:`Memory.ask` — direct verbatim search; ``mode='auto'`` /
+  ``promote=True`` are deferred to v0.0.2 / v0.0.3.
+* :meth:`Memory.status` — read events ring.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from itsme.core.adapters import (
+    InMemoryMemPalaceAdapter,
+    MemPalaceAdapter,
+    MemPalaceHit,
+)
+from itsme.core.adapters.naming import room as _room
+from itsme.core.adapters.naming import wing as _wing
+from itsme.core.events import EventBus, EventEnvelope, EventType
+
+# All 4 documented modes are part of the type even though only
+# ``verbatim`` is implemented in v0.0.1 — the others raise
+# :class:`NotImplementedError` at the boundary so the type accepts
+# them and the runtime rejects them with a precise message.
+AskMode = Literal["verbatim", "auto", "wiki", "now"]
+RememberKind = Literal["decision", "fact", "feeling", "todo", "event", "general"]
+StatusScope = Literal["recent", "today", "session"]
+StatusFormat = Literal["json", "feed"]
+
+# Mapping from kind → room slug. Unknown kind falls back to ``general``.
+_KIND_ROOMS: dict[str, str] = {
+    "decision": "decisions",
+    "fact": "facts",
+    "feeling": "feelings",
+    "todo": "todos",
+    "event": "events",
+    "general": "general",
+}
+
+
+class RememberResult(BaseModel):
+    """What :meth:`Memory.remember` returns to its caller."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str = Field(description="raw.captured event id")
+    drawer_id: str = Field(description="MemPalace drawer id")
+    wing: str
+    room: str
+    routed_to: list[str] = Field(default_factory=list)
+    stored_event_id: str
+
+
+class AskSource(BaseModel):
+    """One row of provenance behind :class:`AskResult`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["verbatim", "wiki"]
+    ref: str
+    content: str
+    score: float
+
+
+class AskResult(BaseModel):
+    """What :meth:`Memory.ask` returns. v0.0.1 stitches verbatim hits."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    answer: str
+    sources: list[AskSource]
+    queried_event_id: str
+    promoted: bool = False
+    promotion_event_id: str | None = None
+
+
+class StatusEvent(BaseModel):
+    """A flattened, JSON-friendly view of an :class:`EventEnvelope`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str
+    ts: datetime
+    type: str
+    source: str
+    payload: dict[str, Any]
+
+
+class StatusResult(BaseModel):
+    """:meth:`Memory.status` payload."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    scope: StatusScope
+    count: int
+    events: list[StatusEvent]
+
+
+# --------------------------------------------------------------------------
+# Memory orchestrator
+# --------------------------------------------------------------------------
+
+
+class Memory:
+    """itsme's in-process facade — the thing MCP tools dispatch to.
+
+    Args:
+        bus: An :class:`EventBus` instance (typically singleton per
+            process).
+        adapter: A :class:`MemPalaceAdapter` implementation. Defaults to
+            :class:`InMemoryMemPalaceAdapter` so tests and bare-bones
+            development just work.
+        project: Project name; becomes the default wing prefix.
+    """
+
+    def __init__(
+        self,
+        *,
+        bus: EventBus,
+        adapter: MemPalaceAdapter | None = None,
+        project: str = "default",
+    ) -> None:
+        self._bus = bus
+        self._adapter: MemPalaceAdapter = adapter or InMemoryMemPalaceAdapter()
+        self._wing = _wing(project)
+
+    # ------------------------------------------------------------------ remember
+    def remember(
+        self,
+        content: str,
+        kind: RememberKind | None = None,
+        *,
+        source: str = "explicit",
+    ) -> RememberResult:
+        """Persist *content* to MemPalace and emit two events.
+
+        v0.0.1 fast-path — no router, no LLM. Each call:
+
+        1. emits ``raw.captured``
+        2. writes a drawer in the project's wing under a kind-derived
+           room (``general`` if *kind* is ``None``)
+        3. emits ``memory.stored``
+
+        Args:
+            content: Verbatim text to store. Empty strings are rejected.
+            kind: Optional hint that selects the room. Recognised values
+                map 1-to-1; anything else falls back to ``general``.
+            source: Producer label written into the event envelope.
+
+        Returns:
+            :class:`RememberResult` with the raw event id, drawer id,
+            and the secondary ``memory.stored`` event id.
+
+        Raises:
+            ValueError: *content* is empty or whitespace-only.
+        """
+        if not content.strip():
+            raise ValueError("remember(content=...) must be non-empty")
+
+        room_label = _KIND_ROOMS.get(kind or "general", "general")
+        room_slug = _room(room_label)
+
+        raw_evt = self._bus.emit(
+            type=EventType.RAW_CAPTURED,
+            source=source,
+            payload={"content": content, "kind": kind},
+        )
+
+        write_res = self._adapter.write(
+            content=content,
+            wing=self._wing,
+            room=room_slug,
+        )
+
+        stored_evt = self._bus.emit(
+            type=EventType.MEMORY_STORED,
+            source="adapter:mempalace",
+            payload={
+                "drawer_id": write_res.drawer_id,
+                "wing": write_res.wing,
+                "room": write_res.room,
+                "raw_event_id": raw_evt.id,
+            },
+        )
+
+        return RememberResult(
+            id=raw_evt.id,
+            drawer_id=write_res.drawer_id,
+            wing=write_res.wing,
+            room=write_res.room,
+            routed_to=[f"mempalace:{write_res.drawer_id}"],
+            stored_event_id=stored_evt.id,
+        )
+
+    # ------------------------------------------------------------------ ask
+    def ask(
+        self,
+        question: str,
+        *,
+        mode: AskMode = "verbatim",
+        limit: int = 5,
+        scope_to_project: bool = True,
+    ) -> AskResult:
+        """Query MemPalace verbatim and emit ``memory.queried``.
+
+        v0.0.1 only honors ``mode='verbatim'``. ``mode='auto'`` and
+        ``mode='wiki'`` route through Aleph (v0.0.2); ``mode='now'``
+        aggregates the events ring (v0.0.3+). Asking for those modes
+        today raises :class:`NotImplementedError` so the boundary is
+        explicit.
+
+        Args:
+            question: Natural-language query.
+            mode: Read strategy — only ``"verbatim"`` is implemented.
+            limit: Max number of hits to return.
+            scope_to_project: When True, restrict the search to the
+                project's wing; when False, search across all wings.
+
+        Returns:
+            :class:`AskResult` with a stitched answer and provenance
+            sources.
+
+        Raises:
+            ValueError: *question* is empty or *limit* is non-positive.
+            NotImplementedError: a v0.0.1-unsupported *mode* was passed.
+        """
+        if not question.strip():
+            raise ValueError("ask(question=...) must be non-empty")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        if mode != "verbatim":
+            raise NotImplementedError(
+                f"mode={mode!r} is not implemented in v0.0.1 — only 'verbatim' is supported"
+            )
+
+        wing_filter = self._wing if scope_to_project else None
+        hits: list[MemPalaceHit] = self._adapter.search(question, limit=limit, wing=wing_filter)
+
+        evt = self._bus.emit(
+            type=EventType.MEMORY_QUERIED,
+            source="reader",
+            payload={
+                "question": question,
+                "mode": mode,
+                "hit_count": len(hits),
+                "wing": wing_filter,
+            },
+        )
+
+        sources = [
+            AskSource(
+                kind="verbatim",
+                ref=f"mempalace:{h.drawer_id}",
+                content=h.content,
+                score=h.score,
+            )
+            for h in hits
+        ]
+        return AskResult(
+            answer=_stitch_answer(hits),
+            sources=sources,
+            queried_event_id=evt.id,
+            promoted=False,
+            promotion_event_id=None,
+        )
+
+    # ------------------------------------------------------------------ status
+    def status(
+        self,
+        *,
+        scope: StatusScope = "recent",
+        limit: int = 20,
+        types: Iterable[EventType] | None = None,
+    ) -> StatusResult:
+        """Surface recent activity from the events ring.
+
+        Args:
+            scope: ``recent`` returns the latest *limit* events;
+                ``today`` filters to events whose ts is within the last
+                24h; ``session`` is treated as ``recent`` until session
+                tracking exists (v0.0.3+).
+            limit: Max events to return.
+            types: Optional event-type filter.
+
+        Returns:
+            :class:`StatusResult` with the matching events newest-first.
+        """
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+
+        events: list[EventEnvelope]
+        if scope == "today":
+            cutoff = datetime.now(tz=UTC) - timedelta(hours=24)
+            events = [e for e in self._bus.tail(n=max(limit, 100), types=types) if e.ts >= cutoff][
+                :limit
+            ]
+        else:
+            # 'recent' and 'session' both fall back to the tail until
+            # session tracking is wired up.
+            events = self._bus.tail(n=limit, types=types)
+
+        flat = [
+            StatusEvent(
+                id=e.id,
+                ts=e.ts,
+                type=e.type.value,
+                source=e.source,
+                payload=dict(e.payload),
+            )
+            for e in events
+        ]
+        return StatusResult(scope=scope, count=len(flat), events=flat)
+
+    # ------------------------------------------------------------------ lifecycle
+    def close(self) -> None:
+        """Close the bus and adapter. Safe to call multiple times."""
+        self._adapter.close()
+        self._bus.close()
+
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
+
+
+def _stitch_answer(hits: list[MemPalaceHit]) -> str:
+    """v0.0.1 placeholder — concatenate verbatim hits with rules.
+
+    The architecture calls for LLM fusion in ``ask(promote=True)``; that
+    arrives in v0.0.3. Until then we return the raw passages so the
+    caller (a coding agent) can do its own synthesis.
+    """
+    if not hits:
+        return ""
+    parts = [f"[{h.score:.2f}] {h.content}" for h in hits]
+    return "\n\n---\n\n".join(parts)
+
+
+def default_db_path() -> Path:
+    """Default events ring location — ``~/.itsme/events.db``."""
+    return Path.home() / ".itsme" / "events.db"
+
+
+def build_default_memory(
+    *,
+    project: str = "default",
+    db_path: Path | None = None,
+    capacity: int = 500,
+    adapter: MemPalaceAdapter | None = None,
+) -> Memory:
+    """Construct a :class:`Memory` with sensible defaults.
+
+    Used by ``itsme.mcp.server`` to wire up a Memory instance from
+    config without leaking pydantic / sqlite plumbing into the MCP
+    layer.
+    """
+    bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
+    return Memory(bus=bus, adapter=adapter, project=project)

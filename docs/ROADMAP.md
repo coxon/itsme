@@ -22,6 +22,8 @@
 - ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
 - ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）
 - ✅ Vault 默认路径：`~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
+- ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（v0.0.1，见 `core/adapters/mempalace.py`）；stdio MCP-client backend 推迟到 T1.13.5
+- ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 
 ---
 
@@ -58,14 +60,14 @@
 - [x] **T1.8** ULID 生成、ts 注入
 
 #### P0 — MCP Surface
-- [ ] **T1.9** MCP server 入口（`mcp/server.py`，基于 `mcp` Python SDK）
-- [ ] **T1.10** `remember(content, kind?)` → 写 events，同步返回 id
-- [ ] **T1.11** `ask(question, mode?)` → 直调 MemPalace.search，**v0.0.1 不实现 promote**
-- [ ] **T1.12** `status(scope?, format?)` → 读 events ring
+- [x] **T1.9** MCP server 入口（`mcp/server.py`，基于 `mcp` Python SDK，FastMCP + stdio）
+- [x] **T1.10** `remember(content, kind?)` → 写 events，同步返回 id
+- [x] **T1.11** `ask(question, mode?)` → 直调 MemPalace.search，**v0.0.1 不实现 promote**（仅 `mode='verbatim'`，`auto`/`wiki`/`now` 显式 `NotImplementedError`）
+- [x] **T1.12** `status(scope?, format?)` → 读 events ring（`json` / `feed` 两种格式）
 
 #### P0 — Adapter
-- [ ] **T1.13** MemPalace adapter（`core/adapters/mempalace.py`），包装 `add_drawer` / `search` / `kg_*`
-- [ ] **T1.14** wing/room 命名规范（itsme 默认用 `wing_<project>` / `room_<topic>`，namespace 隔离）
+- [x] **T1.13** MemPalace adapter（`core/adapters/mempalace.py`，Protocol + `InMemoryMemPalaceAdapter` 参考实现，stdio MCP-client backend 留待 T1.13.5）
+- [x] **T1.14** wing/room 命名规范（itsme 默认用 `wing_<project>` / `room_<topic>`，namespace 隔离）
 
 #### P0 — Worker
 - [ ] **T1.15** router worker（规则路由，仅靠 `kind` 与简单关键词）

@@ -23,7 +23,10 @@ def test_subpackages_importable() -> None:
     """All scaffolded subpackages must import without error."""
     import itsme.core  # noqa: F401
     import itsme.core.adapters  # noqa: F401
+    import itsme.core.adapters.mempalace  # noqa: F401
+    import itsme.core.adapters.naming  # noqa: F401
     import itsme.core.aleph  # noqa: F401
+    import itsme.core.api  # noqa: F401
     import itsme.core.events  # noqa: F401
     import itsme.core.events.bus  # noqa: F401
     import itsme.core.events.ringbuf  # noqa: F401
@@ -46,13 +49,4 @@ def test_mcp_server_entrypoint_importable() -> None:
     import itsme.mcp.server
 
     assert callable(itsme.mcp.server.main)
-
-
-def test_mcp_server_stub_raises() -> None:
-    """v0.0.1 stub must raise NotImplementedError; real impl is T1.9."""
-    import pytest
-
-    import itsme.mcp.server
-
-    with pytest.raises(NotImplementedError, match="T1.9"):
-        itsme.mcp.server.main()
+    assert callable(itsme.mcp.server.build_server)
