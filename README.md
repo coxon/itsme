@@ -62,7 +62,7 @@ registered automatically.
 
 In a fresh CC session:
 
-```
+```text
 > use the remember tool to save: "itsme is wired up"
 > use the status tool to show recent events
 ```
