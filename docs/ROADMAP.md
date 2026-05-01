@@ -50,7 +50,7 @@
 
 #### P0 — 骨架
 - [x] **T1.1** 仓库结构落地（按 ARCHITECTURE §9，src-layout）
-- [ ] **T1.2** `plugin.json` 完善（mcpServers 实启）+ `skills/itsme/SKILL.md` 实质内容
+- [x] **T1.2** `plugin.json` 完善（mcpServers 实启）+ `skills/itsme/SKILL.md` 实质内容
 - [x] **T1.3** Python 包初始化（`pyproject.toml`、hatchling、ruff/pytest 配置）
 - [ ] **T1.4** 基础 README（安装方式、3 动词速查、链接到 docs）
 
