@@ -70,20 +70,26 @@ benefit from knowing "what did we decide about X?" before acting.
 
 ### Modes
 
-- **`auto`** (default) — tries the wiki first, falls back to raw
-  memory. Use this 95% of the time.
-- **`verbatim`** — you specifically need the original phrasing (e.g.
-  to quote the user back to themselves).
-- **`wiki`** — skip raw memory; only show curated entries.
-- **`now`** — aggregate recent activity. Useful for "what was I just
-  working on?"
+- **`verbatim`** (default in v0.0.1) — search raw MemPalace memories by
+  keyword. This is the only mode wired up right now.
+- **`auto`** *(v0.0.2)* — try the curated wiki first, fall back to raw
+  memory. Raises `NotImplementedError` in v0.0.1.
+- **`wiki`** *(v0.0.2)* — only the curated wiki. Raises
+  `NotImplementedError` in v0.0.1.
+- **`now`** *(v0.0.3)* — aggregate recent activity ("what was I just
+  working on?"). Raises `NotImplementedError` in v0.0.1.
+
+In v0.0.1, `ask()` performs a direct verbatim query against MemPalace
+and returns matching drawer snippets. Passing any other mode errors
+out immediately — don't catch and retry with a different mode; the
+answer is "not implemented yet", not "wrong query".
 
 ### Examples
 
-```
-ask("What did we decide about database choice?")            # auto
+```python
+ask("What did we decide about database choice?")               # verbatim (default)
 ask("What did the user say about commit style?", mode="verbatim")
-ask("What have I been working on?", mode="now")
+# ask("What have I been working on?", mode="now")  # ← v0.0.3 only
 ```
 
 ### When `ask` returns nothing
@@ -126,8 +132,14 @@ higher-quality signal because you chose them deliberately.
 - **MCP server not reachable** — tool call errors out. Report once,
   don't retry-loop; the user likely knows their plugin is mis-installed.
 - **Empty `ask` result** — see above.
-- **`remember` returns an id but `status` doesn't show it yet** —
-  normal; there's a short async delay from write → routed → visible.
+- **`remember` succeeded but `status` / `ask` doesn't show it** — in
+  v0.0.1 `remember()` runs `route_and_store` synchronously and emits
+  `memory.stored` *before* returning, so the entry should be
+  immediately visible. If it's not, the cause is on your side: check
+  your `scope` / `limit` / `mode` filters before assuming a backend
+  bug. (v0.0.2+ may introduce async promotion to a wiki layer; that
+  delay will only affect `mode="wiki"` / `mode="auto"`, not the
+  raw-memory query.)
 
 ---
 
