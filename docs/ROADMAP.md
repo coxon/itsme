@@ -17,7 +17,7 @@
 - ✅ `ask(promote=true)`：**同步**（并行 fetch + 融合 + 返回，副作用写回）
 - ✅ LLM provider：**Anthropic**（v0.0.x 先支持，provider 抽象层为未来留口）
 - ✅ Embedding：**本地 sentence-transformers**（v0.0.3 启用）
-- ✅ Hook 触发：**before-exit / before-clear / before-compact**（consolidation 边界，非 per-turn）
+- ✅ Hook 触发：**被动 lifecycle**（SessionEnd=before-exit / PreCompact=before-compact）+ **主动 context-pressure**（UserPromptSubmit / PostToolUse，阈值采样 + Schmitt-trigger debounce）
 - ✅ 多 IDE：**先支持 CC + Codex**，安装方式分别打包
 - ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
 - ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）
@@ -75,16 +75,17 @@
 - [x] **T1.16** worker 调度方式：`WorkerScheduler` — 后台线程独立 asyncio loop（不复用 FastMCP loop，避免 head-of-line blocking）
 
 #### P0 — Hook
-- [ ] **T1.17** CC hook 脚本：`hooks/cc/before-exit`、`before-clear`、`before-compact`（最小：把待丢失上下文塞进 events as `raw.captured`，标 `source=hook:before-<x>`）
+- [x] **T1.17** CC hook 脚本：`hooks/hooks.json` + `hooks/cc/before-exit.sh` / `before-compact.sh`（CC SessionEnd / PreCompact 触发）。Python 实现：`itsme.hooks.lifecycle`，读 `transcript_path` JSONL 取 tail（默认 10K chars），emit `raw.captured` with `source=hook:before-<x>` + `transcript_ref`。
+- [x] **T1.17b** **Context-pressure hook**（主动式）：CC `UserPromptSubmit` / `PostToolUse` 触发，读 `transcript_path` 估 tokens（`chars/4`），跨阈值（默认 0.70，可配 `$ITSME_CTX_THRESHOLD` / `$ITSME_CTX_MAX`）emit `raw.captured` with `source=hook:context-pressure` + `transcript_ref`。Schmitt-trigger debounce：触发后须 pressure 跌 ≥10% (`disarm_drop`) 才重新 arm，状态持久化到 `~/.itsme/state/pressure-<sid>.json`。比 `before-compact` 早，抢救窗口大（v0.0.2 由 Aleph promoter 消费）。
 - [ ] **T1.18** Codex hook 适配（先调研 Codex 的 hook 接口，按其规范实现）
 - [ ] **T1.19** hook 与 explicit remember 的去重标记
 
 #### P1 — 验收
-- [ ] **T1.20** Smoke test：CC 装载、跑一段对话、`/clear` 触发 hook → 检查 MemPalace 是否落库
+- [ ] **T1.20** Smoke test：CC 装载、跑一段对话、SessionEnd / PreCompact / context-pressure 触发 hook → 检查 MemPalace 是否落库
 - [ ] **T1.21** Codex 装载同样验证
 - [ ] **T1.22** `status()` 能在 IDE 里显示最近 N 条事件
 
-**v0.0.1 完成定义**：在 CC（或 Codex）里聊一段 → `/clear` 或退出触发 → MP 里看到 drawer → `ask` 能查回来。
+**v0.0.1 完成定义**：在 CC（或 Codex）里聊一段 → SessionEnd / PreCompact / context-pressure 触发 → MP 里看到 drawer → `ask` 能查回来。
 
 ---
 
@@ -116,7 +117,7 @@
 - [ ] **T2.13** Embedding 推迟到 v0.0.3（避免提前引入依赖）
 
 #### promoter worker
-- [ ] **T2.14** consolidation 边界监听（消费 `consolidation.requested` 事件 from before-exit/clear/compact）
+- [ ] **T2.14** consolidation 边界监听（消费 `raw.captured` with `source=hook:before-exit`/`hook:before-compact`/`hook:context-pressure`；参见 T1.17/T1.17b）
 - [ ] **T2.15** 拉取本次抢救范围内的 `memory.stored` 列表
 - [ ] **T2.16** 主题聚类：v0.0.2 简化版 — 按 wing/room 分组
 - [ ] **T2.17** 调 `aleph.api.write(raw_batch)` per group
@@ -126,11 +127,12 @@
 - [ ] **T2.19** `ask(mode=auto)` 路由：Aleph 优先 → miss 回退 MemPalace
 - [ ] **T2.20** `ask(mode=wiki)` / `mode=verbatim` 单引擎查询
 - [ ] **T2.21** `sources[]` 字段填充（mp / aleph 双类型）
-- [ ] **T2.22** Hook：CC 的 before-exit / before-clear / before-compact 接通 promoter；Codex 同理
+- [ ] **T2.22** Hook → promoter 接线：CC 的 SessionEnd / PreCompact / context-pressure 产生的 `raw.captured` 批量喂给 Aleph；Codex 同理
 
 #### 验收
 - [ ] **T2.23** 一个完整 session：聊 → 退出 → vault 出现新 .md → ask 命中 wiki
 - [ ] **T2.24** 能在 Obsidian 打开 vault，看到 frontmatter + 章节渲染正常
+- [ ] **T2.25** `itsme.hooks._common._iter_transcript_texts` 改成尾部增量读（从 EOF 往回 seek + 按块解析完整 JSONL 行），替换当前 `read_text()` 整文件方案。v0.0.1 transcripts 小，不痛；v0.0.2 接 Aleph promoter 后吞吐变大再优化。
 
 ---
 
@@ -207,8 +209,8 @@
 ## Critical Path（v0.0.1）
 
 ```
-T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.15 ─► T1.17 ─► T1.20
-        (events)     (MCP surface)               (adapter) (router) (CC hook) (smoke)
+T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.15 ─► T1.17,T1.17b ─► T1.20
+        (events)     (MCP surface)               (adapter) (router) (CC hooks)      (smoke)
 ```
 
 T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
@@ -222,7 +224,7 @@ T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
 - [x] **Q3** `ask(promote=true)` → **同步**（并行 fetch + 融合 + 返回）
 - [x] **Q4** LLM provider → **Anthropic**（先支持，留抽象层）
 - [x] **Q5** Embedding → **本地 sentence-transformers**（v0.0.3）
-- [x] **Q6** Hook 触发 → **before-exit / before-clear / before-compact**
+- [x] **Q6** Hook 触发 → **被动 lifecycle**（SessionEnd=before-exit / PreCompact=before-compact）+ **主动 context-pressure 1 个**（阈值采样，Schmitt-trigger debounce；T1.17b）。CC 无专门的 `/clear` hook，交由 context-pressure 覆盖提前抢救需求。
 - [x] **Q7** Vault 默认路径 → `~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
 - [x] **Q8** Plugin 安装 → **CC + Codex 双套**，分别按各自规范打包
 
