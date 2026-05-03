@@ -180,7 +180,7 @@ def test_remember_stamps_content_hash_into_raw_captured(memory: Memory) -> None:
 
     memory.remember("decided to ship", kind="decision")
     raws = memory.status(scope="recent", limit=20, types=[EventType.RAW_CAPTURED]).events
-    assert raws, "expected exactly one raw.captured"
+    assert len(raws) == 1, "expected exactly one raw.captured"
     payload = raws[0].payload
     assert payload["content_hash"] == _hash("decided to ship")
     assert payload["producer_kind"] == _kind("explicit")
