@@ -22,7 +22,7 @@
 - ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
 - ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）
 - ✅ Vault 默认路径：`~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
-- ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（v0.0.1，见 `core/adapters/mempalace.py`）；stdio MCP-client backend 推迟到 T1.13.5
+- ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（`core/adapters/mempalace.py`）+ **stdio MCP-client backend 已落地**（`core/adapters/mempalace_stdio.py`，T1.13.5，v0.0.1 GA），由 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 - ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
 

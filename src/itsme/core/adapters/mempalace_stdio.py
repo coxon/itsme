@@ -34,11 +34,13 @@ Failure model
 * Subprocess crash mid-call → :class:`MemPalaceConnectError`. Future
   calls also raise; v0.0.1 does not auto-respawn (would mask deeper
   bugs). Tracked: v0.0.2 may add a supervised-restart wrapper.
-* Tool returns ``{"error": ...}`` payload (e.g. "No palace found") →
+* Tool returns ``{"error": "No palace found ..."}`` →
   :meth:`StdioMemPalaceAdapter.search` returns ``[]`` (an empty palace
-  isn't an error from the caller's POV); :meth:`write` raises
-  :class:`MemPalaceWriteError` so the producer learns the write
-  didn't land.
+  isn't an error from the caller's POV). Any *other* ``{"error": ...}``
+  payload from search raises :class:`MemPalaceConnectError` so callers
+  see the failure instead of an empty result list. :meth:`write`
+  raises :class:`MemPalaceWriteError` whenever the underlying call
+  doesn't acknowledge the write.
 * Duplicate detection (MemPalace's built-in ``check_duplicate`` fires
   before each write) → returned as a successful write that re-uses the
   existing drawer's id. Rationale: from the agent's perspective
@@ -53,6 +55,7 @@ import hashlib
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -139,10 +142,16 @@ class StdioMemPalaceAdapter:
         if not cmd:
             raise ValueError("command must be a non-empty argv list")
 
+        # Build the merged child env *first* so the PATH lookup honours
+        # any caller-supplied PATH override (e.g. tests pointing at a
+        # private venv). ``None`` still means "inherit unchanged".
+        child_env: dict[str, str] | None = {**os.environ, **dict(env)} if env is not None else None
+        lookup_path = (child_env or os.environ).get("PATH")
+
         # Resolve the executable up-front so a missing interpreter fails
         # loud at __init__ rather than on the first ``write``. Also
         # gives us a clearer error message than Popen's FileNotFoundError.
-        if shutil.which(cmd[0]) is None:
+        if shutil.which(cmd[0], path=lookup_path) is None:
             raise MemPalaceConnectError(
                 f"executable not found on PATH: {cmd[0]!r} "
                 f"(is MemPalace installed and on the same Python as this process?)"
@@ -159,11 +168,8 @@ class StdioMemPalaceAdapter:
         self._stderr_thread: threading.Thread | None = None
 
         try:
-            # Merge — not replace — the parent env. Callers usually want
-            # to override one var (e.g. ``MEMPALACE_PALACE_PATH``); they
-            # should NOT have to also re-pass ``PATH``, ``PYTHONPATH``,
-            # ``HOME``, etc. ``None`` still means "inherit unchanged".
-            child_env = {**os.environ, **dict(env)} if env is not None else None
+            # ``child_env`` was merged once above so the PATH lookup
+            # used the same env we hand the subprocess.
             self._proc = subprocess.Popen(  # noqa: S603 — argv is operator-controlled
                 cmd,
                 stdin=subprocess.PIPE,
@@ -213,7 +219,10 @@ class StdioMemPalaceAdapter:
         :func:`build_default_memory`'s critical path.
         """
         raw_cmd = os.environ.get("ITSME_MEMPALACE_COMMAND", "").strip()
-        cmd = tuple(raw_cmd.split()) if raw_cmd else None
+        # ``shlex.split`` so paths with spaces survive proper quoting,
+        # e.g. ``"/Users/name with space/.venv/bin/python" -m mempalace``.
+        # Naïve ``str.split`` would shred that into 4 tokens.
+        cmd = tuple(shlex.split(raw_cmd)) if raw_cmd else None
         return cls(
             command=cmd,
             handshake_timeout_s=_env_float(

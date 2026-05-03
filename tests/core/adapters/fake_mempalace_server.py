@@ -33,13 +33,14 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 _MODE = "normal"
 _SLEEP_S = 0.0
 _DRAWERS: list[dict[str, str]] = []
 
 
-def _emit(obj: dict) -> None:
+def _emit(obj: dict[str, Any]) -> None:
     """Write one JSON line + flush (NDJSON framing)."""
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
@@ -51,7 +52,7 @@ def _log(msg: str) -> None:
     sys.stderr.flush()
 
 
-def _wrap_result(payload: dict) -> list[dict[str, str]]:
+def _wrap_result(payload: dict[str, Any]) -> list[dict[str, str]]:
     """Emit MemPalace's ``content: [{type: text, text: <json>}]`` shape."""
     return [{"type": "text", "text": json.dumps(payload)}]
 
@@ -72,7 +73,7 @@ def _handle_initialize(rid: int | str) -> None:
     )
 
 
-def _handle_add_drawer(args: dict) -> dict:
+def _handle_add_drawer(args: dict[str, Any]) -> dict[str, Any]:
     wing = args.get("wing", "")
     room = args.get("room", "")
     content = args.get("content", "")
@@ -97,7 +98,7 @@ def _handle_add_drawer(args: dict) -> dict:
     return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
 
 
-def _handle_search(args: dict) -> dict:
+def _handle_search(args: dict[str, Any]) -> dict[str, Any]:
     query = args.get("query", "").lower()
     limit = int(args.get("limit", 5))
     wing = args.get("wing")
@@ -111,7 +112,7 @@ def _handle_search(args: dict) -> dict:
     if wing == "__boom__":
         return {"error": "ChromaDB exploded mid-query"}
     # Cheap substring scoring so the tests can assert deterministic order.
-    scored: list[tuple[float, dict]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for d in _DRAWERS:
         if wing and d["wing"] != wing:
             continue
@@ -141,7 +142,7 @@ def _handle_search(args: dict) -> dict:
     return {"results": [hit for _, hit in scored[:limit]]}
 
 
-def _handle_tools_call(rid: int | str, params: dict) -> None:
+def _handle_tools_call(rid: int | str, params: dict[str, Any]) -> None:
     global _MODE  # noqa: PLW0603 — mode state is intentional for this fake
 
     if _MODE == "slow-call":
