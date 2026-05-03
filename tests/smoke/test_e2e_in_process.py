@@ -398,20 +398,27 @@ def test_cross_restart_drawer_loss_v001_known_gap(db_path: Path) -> None:
     Tracked: ROADMAP T1.13.5 (stdio MemPalace MCP-client backend). When
     T1.13.5 lands and is wired into ``build_default_memory``, this test
     will fail loudly so we remember to flip its semantics.
+
+    Critically, both processes go through ``build_default_memory`` (the
+    same factory the MCP server uses) — NOT a hand-rolled ``Memory(...,
+    adapter=InMemoryMemPalaceAdapter())``. That way when T1.13.5 swaps
+    the factory's default adapter to the persistent backend, this test
+    flips automatically.
     """
     # Session 1: write through process A.
-    bus_a = EventBus(db_path=db_path, capacity=500)
-    mem_a = Memory(bus=bus_a, adapter=InMemoryMemPalaceAdapter(), project="restart")
+    mem_a = build_default_memory(project="restart", db_path=db_path)
     mem_a.remember("alpha-restart-token", kind="fact")
     # Process A would normally close MemPalace here. Drawers go away.
     mem_a.close()
 
-    # Session 2: a fresh process opens the same events ring + a fresh
-    # (empty) InMemoryMemPalace. The router's dedup keys off the
-    # persistent ring, so it sees memory.stored already → skips the
-    # raw.captured → adapter B stays empty.
-    bus_b = EventBus(db_path=db_path, capacity=500)
-    mem_b = Memory(bus=bus_b, adapter=InMemoryMemPalaceAdapter(), project="restart")
+    # Session 2: a fresh process opens the same events ring via the
+    # production factory. Today that gives us a fresh empty adapter; the
+    # router's dedup keys off the persistent ring, so it sees
+    # memory.stored already → skips the raw.captured → adapter B stays
+    # empty. Once T1.13.5 swaps the factory's default to the persistent
+    # backend, the same code path will return the drawer and this test
+    # will fail at the assertion below.
+    mem_b = build_default_memory(project="restart", db_path=db_path)
 
     scheduler = WorkerScheduler()
     scheduler.add_worker(

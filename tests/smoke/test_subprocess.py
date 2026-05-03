@@ -145,8 +145,18 @@ def test_before_exit_shim_writes_raw_captured(tmp_path: Path, shim_env: dict[str
     out = json.loads(proc.stdout)
     assert out.get("continue") is True
 
-    counts = _ring_event_count(Path(shim_env["ITSME_DB_PATH"]))
-    assert counts.get("raw.captured", 0) == 1, counts
+    # Both count + source: a typo'd source label or fallback to a
+    # different producer string would still grow the count by 1, so the
+    # source assertion is what actually proves the right shim ran.
+    from itsme.core.events import EventBus, EventType
+
+    bus = EventBus(db_path=Path(shim_env["ITSME_DB_PATH"]), capacity=500)
+    try:
+        captured = bus.tail(n=10, types=[EventType.RAW_CAPTURED])
+        assert len(captured) == 1
+        assert captured[0].source == "hook:before-exit"
+    finally:
+        bus.close()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="bash shims, POSIX-only")
