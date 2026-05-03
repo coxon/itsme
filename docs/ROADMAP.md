@@ -22,7 +22,7 @@
 - ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
 - ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）
 - ✅ Vault 默认路径：`~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
-- ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（v0.0.1，见 `core/adapters/mempalace.py`）；stdio MCP-client backend 推迟到 T1.13.5
+- ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（`core/adapters/mempalace.py`）+ **stdio MCP-client backend 已落地**（`core/adapters/mempalace_stdio.py`，T1.13.5，v0.0.1 GA），由 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 - ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
 
@@ -68,7 +68,7 @@
 
 #### P0 — Adapter
 - [x] **T1.13** MemPalace adapter（`core/adapters/mempalace.py`，Protocol + `InMemoryMemPalaceAdapter` 参考实现，stdio MCP-client backend 留待 T1.13.5）
-- [ ] **T1.13.5** **Persistent MemPalace backend**（stdio MCP-client adapter）— **v0.0.1 GA blocker**：T1.20 smoke 确认 `InMemoryMemPalaceAdapter` 跨 MCP server 重启会丢 drawer（events ring 的 `memory.stored` 还在 → router 跳过 → 新进程的内存空 adapter 永远查不到）。GA 定义里的 "ask 能查回来" 必须先把这条路接通。详见 `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_loss_v001_known_gap`。
+- [x] **T1.13.5** **Persistent MemPalace backend**（`core/adapters/mempalace_stdio.py`，stdio JSON-RPC MCP-client adapter）— **v0.0.1 GA**：drawer 跨 MCP server 重启不再丢失。`build_default_memory` 通过 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换；默认仍 `inmemory`，待 dogfooding 一段后翻 `auto`。失败模型清晰：`MemPalaceConnectError` vs `MemPalaceWriteError`；handshake / call timeout、子进程崩溃、空 palace 错误回包都有专属分支与单测。fake server 在 `tests/core/adapters/fake_mempalace_server.py`，真二进制 smoke 在 `tests/smoke/test_mempalace_stdio_roundtrip.py`（无 MemPalace 时自动 skip）。
 - [x] **T1.14** wing/room 命名规范（itsme 默认用 `wing_<project>` / `room_<topic>`，namespace 隔离）
 
 #### P0 — Worker
@@ -210,11 +210,18 @@
 ## Critical Path（v0.0.1）
 
 ```
-T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.15 ─► T1.17,T1.17b ─► T1.20
-        (events)     (MCP surface)               (adapter) (router) (CC hooks)      (smoke)
+T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.13.5 ─► T1.15 ─► T1.17,T1.17b ─► T1.20
+        (events)     (MCP surface)               (adapter)  (persist) (router) (CC hooks)      (smoke)
 ```
 
 T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
+
+**v0.0.1 GA 验收必须满足**：
+
+- 三动词 (`remember` / `ask` / `status`) 在 CC 里走通；
+- T1.20 smoke（自动 + 手动 runbook）全绿；
+- T1.13.5 持久化 backend 可用：操作者通过 `$ITSME_MEMPALACE_BACKEND={stdio,auto}` 切换后，drawer 跨 MCP server 重启可读回（默认仍 `inmemory` 以保持 0-依赖装载体验，但 GA 路径必须能切换且失败显式 — `MemPalaceConnectError` / `MemPalaceWriteError`，不静默吞）；
+- `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_loss_v001_known_gap` 在默认翻 `auto` 时会自动翻红，强制 docs/ROADMAP 同步更新。
 
 ---
 

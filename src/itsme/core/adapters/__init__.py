@@ -9,13 +9,27 @@ from itsme.core.adapters.mempalace import (
     MemPalaceHit,
     MemPalaceWriteResult,
 )
+from itsme.core.adapters.mempalace_stdio import (
+    DEFAULT_CALL_TIMEOUT_S,
+    DEFAULT_COMMAND,
+    DEFAULT_HANDSHAKE_TIMEOUT_S,
+    MemPalaceConnectError,
+    MemPalaceWriteError,
+    StdioMemPalaceAdapter,
+)
 from itsme.core.adapters.naming import room, wing
 
 __all__ = [
+    "DEFAULT_CALL_TIMEOUT_S",
+    "DEFAULT_COMMAND",
+    "DEFAULT_HANDSHAKE_TIMEOUT_S",
     "InMemoryMemPalaceAdapter",
     "MemPalaceAdapter",
+    "MemPalaceConnectError",
     "MemPalaceHit",
+    "MemPalaceWriteError",
     "MemPalaceWriteResult",
+    "StdioMemPalaceAdapter",
     "room",
     "wing",
 ]
