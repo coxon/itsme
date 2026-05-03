@@ -68,7 +68,7 @@
 
 #### P0 — Adapter
 - [x] **T1.13** MemPalace adapter（`core/adapters/mempalace.py`，Protocol + `InMemoryMemPalaceAdapter` 参考实现，stdio MCP-client backend 留待 T1.13.5）
-- [ ] **T1.13.5** **Persistent MemPalace backend**（stdio MCP-client adapter）— **v0.0.1 GA blocker**：T1.20 smoke 确认 `InMemoryMemPalaceAdapter` 跨 MCP server 重启会丢 drawer（events ring 的 `memory.stored` 还在 → router 跳过 → 新进程的内存空 adapter 永远查不到）。GA 定义里的 "ask 能查回来" 必须先把这条路接通。详见 `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_loss_v001_known_gap`。
+- [x] **T1.13.5** **Persistent MemPalace backend**（`core/adapters/mempalace_stdio.py`，stdio JSON-RPC MCP-client adapter）— **v0.0.1 GA**：drawer 跨 MCP server 重启不再丢失。`build_default_memory` 通过 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换；默认仍 `inmemory`，待 dogfooding 一段后翻 `auto`。失败模型清晰：`MemPalaceConnectError` vs `MemPalaceWriteError`；handshake / call timeout、子进程崩溃、空 palace 错误回包都有专属分支与单测。fake server 在 `tests/core/adapters/fake_mempalace_server.py`，真二进制 smoke 在 `tests/smoke/test_mempalace_stdio_roundtrip.py`（无 MemPalace 时自动 skip）。
 - [x] **T1.14** wing/room 命名规范（itsme 默认用 `wing_<project>` / `room_<topic>`，namespace 隔离）
 
 #### P0 — Worker

@@ -390,6 +390,64 @@ def build_default_memory(
     Used by ``itsme.mcp.server`` to wire up a Memory instance from
     config without leaking pydantic / sqlite plumbing into the MCP
     layer.
+
+    Backend selection (when *adapter* is not passed):
+
+    * ``$ITSME_MEMPALACE_BACKEND=stdio`` → spawn a real MemPalace MCP
+      server via :class:`StdioMemPalaceAdapter`. This is the v0.0.1 GA
+      wiring — drawers survive MCP restarts.
+    * ``$ITSME_MEMPALACE_BACKEND=inmemory`` (default for now) → in-
+      process adapter. Drawers vanish on restart; documented gap.
+    * ``$ITSME_MEMPALACE_BACKEND=auto`` → try ``stdio``; on
+      :class:`MemPalaceConnectError` fall back to ``inmemory`` with a
+      ``stderr`` warning. Used by ``build_default_memory`` callers that
+      want the best available backend without a hard install dep.
+
+    Flipping the default to ``auto`` happens in a separate PR once this
+    adapter has real-world hours — conservative launch.
     """
     bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
+    if adapter is None:
+        adapter = _select_mempalace_backend()
     return Memory(bus=bus, adapter=adapter, project=project)
+
+
+def _select_mempalace_backend() -> MemPalaceAdapter:
+    """Pick a MemPalace backend based on ``$ITSME_MEMPALACE_BACKEND``.
+
+    Kept as a separate helper so tests can monkeypatch the env var and
+    re-call ``build_default_memory`` without reaching into module state.
+    """
+    import os
+    import sys
+
+    backend = os.environ.get("ITSME_MEMPALACE_BACKEND", "inmemory").strip().lower()
+
+    if backend == "inmemory" or backend == "":
+        return InMemoryMemPalaceAdapter()
+
+    # Import lazily so ``inmemory`` (the default) doesn't pay the import
+    # cost of the subprocess adapter.
+    from itsme.core.adapters.mempalace_stdio import (
+        MemPalaceConnectError,
+        StdioMemPalaceAdapter,
+    )
+
+    if backend == "stdio":
+        return StdioMemPalaceAdapter.from_env()
+
+    if backend == "auto":
+        try:
+            return StdioMemPalaceAdapter.from_env()
+        except MemPalaceConnectError as exc:
+            print(
+                f"itsme: MemPalace stdio backend unavailable ({exc}); "
+                "falling back to in-memory (drawers will not persist across restarts)",
+                file=sys.stderr,
+            )
+            return InMemoryMemPalaceAdapter()
+
+    # Unknown value → refuse silently would hide typos; loud is better.
+    raise ValueError(
+        f"unknown ITSME_MEMPALACE_BACKEND={backend!r} " "(expected one of: inmemory, stdio, auto)"
+    )
