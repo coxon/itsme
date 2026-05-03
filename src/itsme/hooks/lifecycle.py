@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventType
 from itsme.hooks import _common
 
@@ -78,6 +79,11 @@ def run_lifecycle_hook(
         payload={
             "content": content,
             "kind": None,
+            # T1.19: cross-producer dedup keys. The router will skip
+            # this capture if an explicit ``remember()`` (or an earlier
+            # hook fire) already stored exactly the same content.
+            "content_hash": content_hash(content),
+            "producer_kind": producer_kind_from_source(source),
             "hook_event": payload_in.get("hook_event_name"),
             "session_id": payload_in.get("session_id"),
             "transcript_ref": {"path": transcript_path_raw},

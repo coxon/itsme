@@ -525,3 +525,37 @@ def test_rearm_at_exact_disarm_drop_boundary(
     from itsme.hooks.context_pressure import _load_state, _state_path
 
     assert _load_state(_state_path(state_dir, "sess-1")).armed is True
+
+
+# ============================================================
+# T1.19 — content-hash + producer_kind on raw.captured payloads
+# ============================================================
+
+
+def test_pressure_stamps_content_hash_and_producer_kind(
+    tmp_path: Path, bus: EventBus, state_dir: Path
+) -> None:
+    """Pressure-hook captures carry the cross-producer dedup keys.
+
+    Without ``content_hash`` the router can't notice that an explicit
+    ``remember`` ate the same transcript fragment moments earlier.
+    """
+    from itsme.core.dedup import content_hash, producer_kind_from_source
+
+    transcript = tmp_path / "t.jsonl"
+    _transcript(transcript, chars=4000)  # 4000/4 = 1000 tokens
+
+    run_context_pressure(
+        _stdin(transcript),
+        bus=bus,
+        state_dir=state_dir,
+        threshold=0.05,
+        max_tokens=10_000,
+    )
+
+    events = bus.tail(n=10, types=[EventType.RAW_CAPTURED])
+    assert len(events) == 1
+    payload = events[0].payload
+    assert payload["content_hash"] == content_hash(payload["content"])
+    assert payload["producer_kind"] == producer_kind_from_source("hook:context-pressure")
+    assert payload["producer_kind"] == "hook:context-pressure"

@@ -30,6 +30,7 @@ from itsme.core.adapters import (
     MemPalaceHit,
 )
 from itsme.core.adapters.naming import wing as _wing
+from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.workers.router import Router
 
@@ -167,7 +168,15 @@ class Memory:
         raw_evt = self._bus.emit(
             type=EventType.RAW_CAPTURED,
             source=source,
-            payload={"content": content, "kind": kind},
+            payload={
+                "content": content,
+                "kind": kind,
+                # T1.19: stamp identity so downstream router can
+                # dedup against prior captures (hook + explicit cross
+                # the same fact constantly in real CC sessions).
+                "content_hash": content_hash(content),
+                "producer_kind": producer_kind_from_source(source),
+            },
         )
 
         write_res = self._router.route_and_store(raw_evt)
@@ -196,16 +205,35 @@ class Memory:
         violated upstream and we raise rather than handing the caller
         an empty / wrong id.
 
+        T1.19 dedup case: when the router short-circuits via
+        ``_emit_dedup_skip`` it does NOT emit a fresh ``memory.stored``
+        for *raw_event_id* — instead it emits a ``memory.curated``
+        whose payload carries ``original_stored_event_id`` pointing at
+        the prior drawer's stored event. We honour that link so the
+        caller still gets a stable id corresponding to a real drawer
+        write (just the original one, not a duplicate).
+
         Raises:
-            RuntimeError: No matching ``memory.stored`` was found —
-                indicates ``Router.route_and_store`` returned without
-                emitting the post-write ack, which is a bug.
+            RuntimeError: No matching ``memory.stored`` was found and no
+                ``memory.curated`` dedup link either — indicates
+                ``Router.route_and_store`` returned without emitting
+                either event, which is a bug.
         """
         # Use the bus's full ring capacity (default 500). The router
         # emits memory.stored last, so a tail walk is O(window).
         for env in self._bus.tail(n=self._bus.count(), types=[EventType.MEMORY_STORED]):
             if env.payload.get("raw_event_id") == raw_event_id:
                 return env.id
+        # Dedup fallback — find the curated event that points back at
+        # the prior drawer's stored event id and return *that*.
+        for env in self._bus.tail(n=self._bus.count(), types=[EventType.MEMORY_CURATED]):
+            if (
+                env.payload.get("raw_event_id") == raw_event_id
+                and env.payload.get("reason") == "dedup"
+            ):
+                original = env.payload.get("original_stored_event_id")
+                if isinstance(original, str) and original:
+                    return original
         raise RuntimeError(f"router did not emit memory.stored for raw_event_id={raw_event_id!r}")
 
     # ------------------------------------------------------------------ ask

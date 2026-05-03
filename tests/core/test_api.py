@@ -161,3 +161,105 @@ def test_status_rejects_non_positive_limit(memory: Memory) -> None:
     """limit must be positive."""
     with pytest.raises(ValueError):
         memory.status(limit=0)
+
+
+# ============================================================
+# T1.19 — content-hash dedup via the public Memory API
+# ============================================================
+
+
+def test_remember_stamps_content_hash_into_raw_captured(memory: Memory) -> None:
+    """``Memory.remember`` mirrors content_hash + producer_kind onto raw.captured.
+
+    Pins the wire contract: T1.19 dedup downstream depends on every
+    ``Memory.remember`` call carrying the hash so the router can
+    short-circuit cross-producer collisions.
+    """
+    from itsme.core.dedup import content_hash as _hash
+    from itsme.core.dedup import producer_kind_from_source as _kind
+
+    memory.remember("decided to ship", kind="decision")
+    raws = memory.status(scope="recent", limit=20, types=[EventType.RAW_CAPTURED]).events
+    assert len(raws) == 1, "expected exactly one raw.captured"
+    payload = raws[0].payload
+    assert payload["content_hash"] == _hash("decided to ship")
+    assert payload["producer_kind"] == _kind("explicit")
+
+
+def test_remember_twice_same_content_returns_same_drawer(memory: Memory) -> None:
+    """A double remember of identical content surfaces one drawer.
+
+    Idempotent ``remember`` is what callers get for free now that the
+    router dedups — the second call returns the *original* drawer_id
+    so downstream graph / promotion tools have a stable handle.
+    """
+    a = memory.remember("decided to roll back", kind="decision")
+    b = memory.remember("decided to roll back", kind="decision")
+    assert b.drawer_id == a.drawer_id
+    assert b.wing == a.wing
+    assert b.room == a.room
+    # ``stored_event_id`` points back at the *original* memory.stored
+    # event (via the curated dedup link in ``_latest_stored_event_id``).
+    assert b.stored_event_id == a.stored_event_id
+
+
+def test_remember_dedup_emits_memory_curated(memory: Memory) -> None:
+    """The dedup short-circuit logs a memory.curated event for observability."""
+    memory.remember("idempotent fact", kind="fact")
+    memory.remember("idempotent fact", kind="fact")
+
+    curated = memory.status(scope="recent", limit=20, types=[EventType.MEMORY_CURATED]).events
+    assert len(curated) == 1
+    assert curated[0].payload["reason"] == "dedup"
+    assert curated[0].payload["producer_kind"] == "explicit"
+
+
+def test_remember_different_content_writes_two_drawers(memory: Memory) -> None:
+    """Sanity: distinct content does not get accidentally deduped."""
+    a = memory.remember("alpha decision", kind="decision")
+    b = memory.remember("beta decision", kind="decision")
+    assert a.drawer_id != b.drawer_id
+    stored = memory.status(scope="recent", limit=20, types=[EventType.MEMORY_STORED]).events
+    assert len(stored) == 2
+    curated = memory.status(scope="recent", limit=20, types=[EventType.MEMORY_CURATED]).events
+    assert curated == []
+
+
+def test_remember_dedups_against_prior_hook_capture(memory: Memory) -> None:
+    """Cross-producer: a hook capture seeds dedup; explicit remember surfaces it.
+
+    Simulates the real-session shape — a SessionEnd salvage already
+    ran (somehow earlier in this process) and stored "decided X". The
+    user later runs ``remember("decided X")`` explicitly. With T1.19
+    the explicit call returns the prior drawer rather than writing a
+    second one.
+    """
+    from itsme.core.dedup import content_hash as _hash
+    from itsme.core.dedup import producer_kind_from_source as _kind
+
+    bus = memory._bus  # noqa: SLF001
+    # Seed a hook-style raw.captured + run the router fast-path on it
+    # via the internal router so we don't need the consume_loop.
+    hook_raw = bus.emit(
+        type=EventType.RAW_CAPTURED,
+        source="hook:before-exit",
+        payload={
+            "content": "decided to roll forward",
+            "kind": "decision",
+            "content_hash": _hash("decided to roll forward"),
+            "producer_kind": _kind("hook:before-exit"),
+        },
+    )
+    hook_write = memory._router.route_and_store(hook_raw)  # noqa: SLF001
+
+    # Now the explicit remember of the same content.
+    res = memory.remember("decided to roll forward", kind="decision")
+
+    # Surfaces the hook's drawer.
+    assert res.drawer_id == hook_write.drawer_id
+    # Exactly one memory.stored, one memory.curated.
+    stored = memory.status(scope="recent", limit=20, types=[EventType.MEMORY_STORED]).events
+    curated = memory.status(scope="recent", limit=20, types=[EventType.MEMORY_CURATED]).events
+    assert len(stored) == 1
+    assert len(curated) == 1
+    assert curated[0].payload["producer_kind"] == "explicit"

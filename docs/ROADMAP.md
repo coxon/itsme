@@ -79,7 +79,7 @@
 - [x] **T1.17** CC hook 脚本：`hooks/hooks.json` + `hooks/cc/before-exit.sh` / `before-compact.sh`（CC SessionEnd / PreCompact 触发）。Python 实现：`itsme.hooks.lifecycle`，读 `transcript_path` JSONL 取 tail（默认 10K chars），emit `raw.captured` with `source=hook:before-<x>` + `transcript_ref`。
 - [x] **T1.17b** **Context-pressure hook**（主动式）：CC `UserPromptSubmit` / `PostToolUse` 触发，读 `transcript_path` 估 tokens（`chars/4`），跨阈值（默认 0.70，可配 `$ITSME_CTX_THRESHOLD` / `$ITSME_CTX_MAX`）emit `raw.captured` with `source=hook:context-pressure` + `transcript_ref`。Schmitt-trigger debounce：触发后须 pressure 跌 ≥10% (`disarm_drop`) 才重新 arm，状态持久化到 `~/.itsme/state/pressure-<sid>.json`。比 `before-compact` 早，抢救窗口大（v0.0.2 由 Aleph promoter 消费）。
 - [ ] **T1.18** Codex hook 适配（先调研 Codex 的 hook 接口，按其规范实现）
-- [ ] **T1.19** hook 与 explicit remember 的去重标记
+- [x] **T1.19** hook 与 explicit remember 的去重（`core/dedup.py` 里算 `content_hash = sha256(content.strip())` 与 `producer_kind` 桶，所有 `raw.captured` producer 都打标；router 写前扫 `memory.stored` 的 `content_hash` — 命中就发一个 `memory.curated` with `reason="dedup"` + `original_stored_event_id` 并返回原 drawer。dedup 键故意用 `memory.stored`（post-write）而非 `memory.routed`（pre-write），失败写不会污染后续重试。跨 producer：explicit ↔ hook:lifecycle ↔ hook:context-pressure 同 content 互相 coalesce；stored 只留 1 条，caller 拿到同一个 drawer_id。没引入新 event type — 复用现有 6 个。）
 
 #### P1 — 验收
 - [x] **T1.20** Smoke test：自动 + 手动两层（`tests/smoke/` 17 项 + `docs/SMOKE.md` 真 CC runbook）。CC 装载、SessionEnd / PreCompact / context-pressure → events ring + router → MemPalace；surfaced T1.13.5 跨重启 drawer 丢失为 v0.0.1 GA blocker。
@@ -214,7 +214,7 @@ T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.13.5 
         (events)     (MCP surface)               (adapter)  (persist) (router) (CC hooks)      (smoke)
 ```
 
-T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
+T1.14 / T1.18 (Codex) / T1.21 / T1.22 与主路径并行（T1.19 已在 critical path 前置完成）。
 
 **v0.0.1 GA 验收必须满足**：
 

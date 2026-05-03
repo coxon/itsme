@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventType
 from itsme.hooks import _common
 
@@ -271,6 +272,9 @@ def run_context_pressure(
         payload={
             "content": snapshot,
             "kind": None,
+            # T1.19: cross-producer dedup keys (see core/dedup.py).
+            "content_hash": content_hash(snapshot),
+            "producer_kind": producer_kind_from_source("hook:context-pressure"),
             "pressure": round(pressure, 3),
             "tokens_estimated": tokens,
             "threshold": resolved_threshold,

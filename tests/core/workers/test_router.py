@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from itsme.core.adapters import InMemoryMemPalaceAdapter
+from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.workers.router import KIND_TO_ROOM, Router, RouterDecision
 
@@ -32,11 +33,17 @@ def _raw(
     content: str,
     kind: str | None = None,
     source: str = "explicit",
+    *,
+    stamp_dedup: bool = False,
 ) -> EventEnvelope:
+    payload: dict[str, object] = {"content": content, "kind": kind}
+    if stamp_dedup:
+        payload["content_hash"] = content_hash(content)
+        payload["producer_kind"] = producer_kind_from_source(source)
     return bus.emit(
         type=EventType.RAW_CAPTURED,
         source=source,
-        payload={"content": content, "kind": kind},
+        payload=payload,
     )
 
 
@@ -322,3 +329,212 @@ def test_router_decision_is_frozen() -> None:
     d = RouterDecision(wing="w", room="r", kind_used="fact", rule="kind-explicit")
     with pytest.raises((AttributeError, Exception)):
         d.wing = "other"  # type: ignore[misc]
+
+
+# ============================================================
+# T1.19 — content-hash cross-producer dedup
+# ============================================================
+
+
+def test_route_and_store_mirrors_content_hash_into_memory_stored(env: RouterEnv) -> None:
+    """``memory.stored`` payload carries the same ``content_hash`` as raw.captured.
+
+    The router scans ``memory.stored`` newest-first to look up prior
+    drawers — mirroring the hash there keeps the dedup walk a single-
+    pass over one event type.
+    """
+    bus, router, _ = env
+    raw = _raw(bus, "decided to ship Friday", kind="decision", stamp_dedup=True)
+    router.route_and_store(raw)
+
+    stored = bus.tail(n=10, types=[EventType.MEMORY_STORED])
+    assert stored
+    assert stored[0].payload["content_hash"] == content_hash("decided to ship Friday")
+
+
+def test_route_and_store_dedups_same_content_within_producer(env: RouterEnv) -> None:
+    """Two captures of identical content from the same producer dedup.
+
+    Second call must NOT emit a fresh memory.stored. Instead it emits
+    one memory.curated (reason=dedup) and returns the same drawer_id
+    as the first call.
+    """
+    bus, router, _ = env
+    first = _raw(bus, "decided X", kind="decision", stamp_dedup=True)
+    res1 = router.route_and_store(first)
+
+    second = _raw(bus, "decided X", kind="decision", stamp_dedup=True)
+    res2 = router.route_and_store(second)
+
+    # Same drawer surfaced.
+    assert res2.drawer_id == res1.drawer_id
+    assert res2.wing == res1.wing
+    assert res2.room == res1.room
+
+    # Exactly one memory.stored across both calls.
+    stored = bus.tail(n=20, types=[EventType.MEMORY_STORED])
+    assert len(stored) == 1
+
+    # Exactly one memory.curated, with reason=dedup, pointing at the
+    # original stored event id.
+    curated = bus.tail(n=20, types=[EventType.MEMORY_CURATED])
+    assert len(curated) == 1
+    cur = curated[0]
+    assert cur.payload["reason"] == "dedup"
+    assert cur.payload["raw_event_id"] == second.id
+    assert cur.payload["original_stored_event_id"] == stored[0].id
+    assert cur.payload["drawer_id"] == res1.drawer_id
+    assert cur.payload["content_hash"] == content_hash("decided X")
+    assert cur.payload["producer_kind"] == "explicit"
+
+
+def test_route_and_store_dedups_cross_producer(env: RouterEnv) -> None:
+    """Explicit remember + hook capture of same content → dedup.
+
+    The cross-producer case is the whole point of T1.19: a real CC
+    session has the user calling ``remember("decided X")`` mid-session
+    and then SessionEnd later salvaging a transcript tail that contains
+    the same line. Without dedup, MemPalace ends up with two drawers
+    for the same fact.
+    """
+    bus, router, _ = env
+    explicit = _raw(bus, "decided to roll back", kind="decision", stamp_dedup=True)
+    router.route_and_store(explicit)
+
+    hook = _raw(
+        bus,
+        "decided to roll back",
+        source="hook:before-exit",
+        stamp_dedup=True,
+    )
+    res2 = router.route_and_store(hook)
+
+    stored = bus.tail(n=20, types=[EventType.MEMORY_STORED])
+    curated = bus.tail(n=20, types=[EventType.MEMORY_CURATED])
+    assert len(stored) == 1
+    assert len(curated) == 1
+    # Curated payload records the *hook* as the deduped producer.
+    assert curated[0].payload["producer_kind"] == "hook:lifecycle"
+    assert curated[0].payload["raw_event_id"] == hook.id
+    assert res2.drawer_id == stored[0].payload["drawer_id"]
+
+
+def test_route_and_store_normalises_whitespace_for_dedup(env: RouterEnv) -> None:
+    """``"X"`` and ``"X\\n"`` collide via the strip()-then-hash recipe.
+
+    Transcript tails almost always carry a trailing newline; without
+    normalisation an explicit remember + hook pair would always escape
+    dedup.
+    """
+    bus, router, _ = env
+    a = _raw(bus, "decided to deploy", kind="decision", stamp_dedup=True)
+    router.route_and_store(a)
+
+    b = _raw(bus, "decided to deploy\n", kind="decision", stamp_dedup=True)
+    router.route_and_store(b)
+
+    stored = bus.tail(n=20, types=[EventType.MEMORY_STORED])
+    curated = bus.tail(n=20, types=[EventType.MEMORY_CURATED])
+    assert len(stored) == 1
+    assert len(curated) == 1
+
+
+def test_route_and_store_does_not_dedup_different_content(env: RouterEnv) -> None:
+    """Two captures with distinct content produce two drawers.
+
+    Sanity check that dedup is keyed on content_hash, not on type/wing.
+    """
+    bus, router, _ = env
+    a = _raw(bus, "decided to ship Friday", kind="decision", stamp_dedup=True)
+    b = _raw(bus, "decided to ship Monday", kind="decision", stamp_dedup=True)
+    router.route_and_store(a)
+    router.route_and_store(b)
+
+    stored = bus.tail(n=20, types=[EventType.MEMORY_STORED])
+    curated = bus.tail(n=20, types=[EventType.MEMORY_CURATED])
+    assert len(stored) == 2
+    assert curated == []
+
+
+def test_route_and_store_without_content_hash_still_writes(env: RouterEnv) -> None:
+    """Backward-compat: a raw.captured without ``content_hash`` skips dedup.
+
+    All v0.0.1 producers stamp the hash, but the router must not
+    require it (envelopes seeded by older code paths or external
+    producers should still route normally — they just bypass dedup).
+    """
+    bus, router, _ = env
+    # No stamp_dedup → no content_hash in payload.
+    raw = _raw(bus, "decided Z", kind="decision")
+    res = router.route_and_store(raw)
+
+    stored = bus.tail(n=10, types=[EventType.MEMORY_STORED])
+    assert len(stored) == 1
+    assert res.drawer_id == stored[0].payload["drawer_id"]
+    # content_hash mirrored as None on the stored payload.
+    assert stored[0].payload["content_hash"] is None
+
+
+def test_dedup_does_not_count_failed_writes(env: RouterEnv) -> None:
+    """Dedup window is keyed on memory.stored — failed writes don't poison.
+
+    Pinned regression for the post-write keying invariant: if dedup were
+    keyed on raw.captured (or memory.routed), a failed adapter write
+    would still mark the content_hash as "seen" and the retry path
+    would silently surface a non-existent prior drawer.
+    """
+    bus, router, adapter = env
+
+    # First capture — adapter write blows up before memory.stored.
+    a = _raw(bus, "ephemeral content", kind="decision", stamp_dedup=True)
+    original_write = adapter.write
+    adapter.write = lambda **_: (_ for _ in ()).throw(  # type: ignore[method-assign]
+        RuntimeError("disk full")
+    )
+    with pytest.raises(RuntimeError):
+        router.route_and_store(a)
+
+    # No memory.stored, no memory.curated emitted yet.
+    assert bus.tail(n=10, types=[EventType.MEMORY_STORED]) == []
+    assert bus.tail(n=10, types=[EventType.MEMORY_CURATED]) == []
+
+    # Second capture of the *same* content with adapter restored — must
+    # actually persist (not falsely treated as a dedup hit).
+    adapter.write = original_write  # type: ignore[method-assign]
+    b = _raw(bus, "ephemeral content", kind="decision", stamp_dedup=True)
+    router.route_and_store(b)
+
+    stored = bus.tail(n=10, types=[EventType.MEMORY_STORED])
+    curated = bus.tail(n=10, types=[EventType.MEMORY_CURATED])
+    assert len(stored) == 1
+    assert curated == []
+    # The drawer is searchable now.
+    assert adapter.search("ephemeral")
+
+
+def test_dedup_skip_does_not_emit_extra_routed_or_stored(env: RouterEnv) -> None:
+    """Dedup short-circuit emits ONLY memory.curated, nothing else.
+
+    Re-emitting memory.routed/memory.stored on the dedup path would
+    break the consume-loop's raw_event_id-keyed dedup invariant ("one
+    stored per raw") and double-count routing in observability tools.
+    """
+    bus, router, _ = env
+    first = _raw(bus, "decided Q", kind="decision", stamp_dedup=True)
+    router.route_and_store(first)
+
+    routed_before = len(bus.tail(n=20, types=[EventType.MEMORY_ROUTED]))
+    stored_before = len(bus.tail(n=20, types=[EventType.MEMORY_STORED]))
+
+    # Second call — same content, must short-circuit.
+    second = _raw(bus, "decided Q", kind="decision", stamp_dedup=True)
+    router.route_and_store(second)
+
+    routed_after = len(bus.tail(n=20, types=[EventType.MEMORY_ROUTED]))
+    stored_after = len(bus.tail(n=20, types=[EventType.MEMORY_STORED]))
+
+    # No new routed / no new stored.
+    assert routed_after == routed_before
+    assert stored_after == stored_before
+    # Exactly one new curated.
+    assert len(bus.tail(n=20, types=[EventType.MEMORY_CURATED])) == 1
