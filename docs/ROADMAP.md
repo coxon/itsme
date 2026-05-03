@@ -68,6 +68,7 @@
 
 #### P0 — Adapter
 - [x] **T1.13** MemPalace adapter（`core/adapters/mempalace.py`，Protocol + `InMemoryMemPalaceAdapter` 参考实现，stdio MCP-client backend 留待 T1.13.5）
+- [ ] **T1.13.5** **Persistent MemPalace backend**（stdio MCP-client adapter）— **v0.0.1 GA blocker**：T1.20 smoke 确认 `InMemoryMemPalaceAdapter` 跨 MCP server 重启会丢 drawer（events ring 的 `memory.stored` 还在 → router 跳过 → 新进程的内存空 adapter 永远查不到）。GA 定义里的 "ask 能查回来" 必须先把这条路接通。详见 `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_loss_v001_known_gap`。
 - [x] **T1.14** wing/room 命名规范（itsme 默认用 `wing_<project>` / `room_<topic>`，namespace 隔离）
 
 #### P0 — Worker
@@ -81,7 +82,7 @@
 - [ ] **T1.19** hook 与 explicit remember 的去重标记
 
 #### P1 — 验收
-- [ ] **T1.20** Smoke test：CC 装载、跑一段对话、SessionEnd / PreCompact / context-pressure 触发 hook → 检查 MemPalace 是否落库
+- [x] **T1.20** Smoke test：自动 + 手动两层（`tests/smoke/` 17 项 + `docs/SMOKE.md` 真 CC runbook）。CC 装载、SessionEnd / PreCompact / context-pressure → events ring + router → MemPalace；surfaced T1.13.5 跨重启 drawer 丢失为 v0.0.1 GA blocker。
 - [ ] **T1.21** Codex 装载同样验证
 - [ ] **T1.22** `status()` 能在 IDE 里显示最近 N 条事件
 

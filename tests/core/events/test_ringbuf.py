@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,14 +14,35 @@ from ulid import ULID
 from itsme.core.events.ringbuf import RingBuffer
 from itsme.core.events.schema import EventEnvelope, EventType
 
+# ULIDs are time-ordered at ms resolution but the random tail is not
+# monotonic within a ms — three back-to-back ``ULID()`` calls on a fast
+# host can return ids that sort against insertion order. The ringbuf
+# orders by id, so tests that assert insertion order would see a
+# CI-only flake (observed on the GH runners on PR #10 r1). Force
+# monotonic ms-resolution timestamps in the test factory; production
+# code paths are unaffected.
+_ulid_lock = threading.Lock()
+_last_ulid_ms = 0
+
+
+def _monotonic_ulid() -> ULID:
+    """Return a ULID whose ms timestamp is strictly greater than the last call."""
+    global _last_ulid_ms
+    with _ulid_lock:
+        now_ms = int(time.time() * 1000)
+        ms = max(_last_ulid_ms + 1, now_ms)
+        _last_ulid_ms = ms
+        # ms→seconds for from_timestamp; the random tail is fresh per call.
+        return ULID.from_timestamp(ms / 1000.0)
+
 
 def _make_event(
     evt_type: EventType = EventType.RAW_CAPTURED,
     source: str = "test",
 ) -> EventEnvelope:
-    """Build a fresh envelope with a real ULID."""
+    """Build a fresh envelope with a monotonically-increasing ULID."""
     return EventEnvelope(
-        id=str(ULID()),
+        id=str(_monotonic_ulid()),
         ts=datetime.now(tz=UTC),
         type=evt_type,
         source=source,
