@@ -145,7 +145,9 @@ class Router:
                 :meth:`EventBus.emit`.
 
         Returns:
-            The :class:`MemPalaceWriteResult` from the adapter.
+            The :class:`MemPalaceWriteResult` from the adapter (or a
+            synthesised result echoing a prior drawer when the dedup
+            short-circuit fires — see T1.19).
 
         Raises:
             ValueError: *env* is not ``raw.captured`` or its payload
@@ -155,6 +157,19 @@ class Router:
         content = env.payload.get("content")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("raw.captured payload must carry non-empty 'content'")
+
+        # T1.19: cross-producer dedup. If an earlier capture (by *any*
+        # producer — explicit, lifecycle hook, pressure hook) already
+        # landed the same ``content_hash``, skip the adapter write and
+        # surface the prior drawer instead. This is the path that stops
+        # an explicit ``remember("decided on X")`` mid-session from
+        # being double-stored when SessionEnd later captures the same
+        # transcript line.
+        c_hash = env.payload.get("content_hash")
+        if isinstance(c_hash, str) and c_hash:
+            prior = self._find_stored_by_hash(c_hash)
+            if prior is not None:
+                return self._emit_dedup_skip(env, prior, decision)
 
         # 1. log the decision (observability)
         self._bus.emit(
@@ -176,7 +191,8 @@ class Router:
             room=decision.room,
         )
 
-        # 3. ack
+        # 3. ack — content_hash is mirrored into memory.stored so the
+        # dedup scan above stays a single-pass walk over one event type.
         self._bus.emit(
             type=EventType.MEMORY_STORED,
             source="adapter:mempalace",
@@ -185,6 +201,7 @@ class Router:
                 "wing": write_res.wing,
                 "room": write_res.room,
                 "raw_event_id": env.id,
+                "content_hash": c_hash,
             },
         )
         return write_res
@@ -296,3 +313,67 @@ class Router:
             if env.payload.get("raw_event_id") == raw_event_id:
                 return True
         return False
+
+    def _find_stored_by_hash(self, c_hash: str) -> EventEnvelope | None:
+        """Return the most-recent ``memory.stored`` carrying ``content_hash``.
+
+        T1.19 cross-producer dedup. Walks the ring window of
+        ``memory.stored`` events newest-first and returns the first
+        match — that's the prior drawer the new capture should
+        coalesce against. ``None`` means "no match, do the write".
+
+        Note we walk ``memory.stored``, not ``raw.captured``: a
+        ``raw.captured`` whose write failed *will* still be in the ring
+        but should NOT count as deduped (otherwise the retry path is
+        permanently broken). Mirroring ``content_hash`` into
+        ``memory.stored`` payloads at write time gives us a single-pass
+        scan that excludes failures by construction.
+        """
+        for env in self._bus.tail(n=500, types=[EventType.MEMORY_STORED]):
+            if env.payload.get("content_hash") == c_hash:
+                return env
+        return None
+
+    def _emit_dedup_skip(
+        self,
+        raw_env: EventEnvelope,
+        prior_stored: EventEnvelope,
+        decision: RouterDecision,
+    ) -> MemPalaceWriteResult:
+        """Skip the adapter write, log the dedup, return the prior drawer.
+
+        Emits one ``memory.curated`` event (``reason="dedup"``) so
+        observability tools can count cross-producer collisions without
+        scanning content payloads. Does NOT emit ``memory.routed`` or
+        ``memory.stored`` — the prior write already produced those, and
+        re-emitting would break the consume-loop's
+        ``raw_event_id``-keyed dedup invariant (one stored per raw).
+
+        The synthesised :class:`MemPalaceWriteResult` lets
+        :meth:`Memory.remember` hand the caller a stable drawer_id /
+        wing / room that points at the *original* drawer — exactly what
+        an idempotent ``remember`` should return.
+        """
+        prior_drawer_id = str(prior_stored.payload.get("drawer_id", ""))
+        prior_wing = str(prior_stored.payload.get("wing", decision.wing))
+        prior_room = str(prior_stored.payload.get("room", decision.room))
+
+        self._bus.emit(
+            type=EventType.MEMORY_CURATED,
+            source="worker:router",
+            payload={
+                "reason": "dedup",
+                "raw_event_id": raw_env.id,
+                "producer_kind": raw_env.payload.get("producer_kind"),
+                "content_hash": raw_env.payload.get("content_hash"),
+                "original_stored_event_id": prior_stored.id,
+                "drawer_id": prior_drawer_id,
+                "wing": prior_wing,
+                "room": prior_room,
+            },
+        )
+        return MemPalaceWriteResult(
+            drawer_id=prior_drawer_id,
+            wing=prior_wing,
+            room=prior_room,
+        )

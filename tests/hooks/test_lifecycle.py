@@ -173,3 +173,48 @@ def test_disabled_short_circuits_before_parsing_stdin(bus: EventBus) -> None:
         out = run_lifecycle_hook("not json at all", bus=bus, source="hook:before-exit")
     assert out["continue"] is True
     assert bus.count() == 0
+
+
+# ============================================================
+# T1.19 — content-hash + producer_kind on raw.captured payloads
+# ============================================================
+
+
+def test_lifecycle_stamps_content_hash_and_producer_kind(tmp_path: Path, bus: EventBus) -> None:
+    """Lifecycle hook seeds the cross-producer dedup keys.
+
+    Without these the router can't dedup against a later explicit
+    ``remember`` of the same transcript line.
+    """
+    from itsme.core.dedup import content_hash, producer_kind_from_source
+
+    transcript = tmp_path / "t.jsonl"
+    _make_transcript(transcript, ["decided to deploy on monday"])
+
+    run_lifecycle_hook(_stdin(transcript), bus=bus, source="hook:before-exit")
+
+    events = bus.tail(n=10, types=[EventType.RAW_CAPTURED])
+    assert len(events) == 1
+    payload = events[0].payload
+    assert payload["content_hash"] == content_hash(payload["content"])
+    assert payload["producer_kind"] == producer_kind_from_source("hook:before-exit")
+    assert payload["producer_kind"] == "hook:lifecycle"
+
+
+def test_pre_compact_uses_lifecycle_producer_kind(tmp_path: Path, bus: EventBus) -> None:
+    """before-compact rolls up to the same producer bucket as before-exit.
+
+    Both lifecycle hooks share dedup state — capturing the same content
+    via SessionEnd then PreCompact (or vice-versa) must collide.
+    """
+    transcript = tmp_path / "t.jsonl"
+    _make_transcript(transcript, ["hello world"])
+
+    run_lifecycle_hook(
+        _stdin(transcript, hook_event_name="PreCompact"),
+        bus=bus,
+        source="hook:before-compact",
+    )
+
+    events = bus.tail(n=10, types=[EventType.RAW_CAPTURED])
+    assert events[0].payload["producer_kind"] == "hook:lifecycle"
