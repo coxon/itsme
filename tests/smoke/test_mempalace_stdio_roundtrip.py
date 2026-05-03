@@ -28,26 +28,43 @@ import pytest
 from itsme.core.adapters.mempalace_stdio import StdioMemPalaceAdapter
 
 
-def _mempalace_importable() -> bool:
-    """Best-effort check: can ``python3 -m mempalace.mcp_server --help`` boot?"""
-    python = shutil.which("python3") or sys.executable
-    try:
-        proc = subprocess.run(
-            [python, "-c", "import mempalace.mcp_server"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-    return proc.returncode == 0
+def _detect_mempalace_python() -> str | None:
+    """Return the interpreter that can ``import mempalace.mcp_server``.
+
+    We probe with the same interpreter we'll later spawn the server
+    with, otherwise a host with two pythons (system ``python3`` without
+    MemPalace + a venv ``python`` with it, or vice-versa) would pass
+    the probe and then fail to boot. Prefers ``which python3`` →
+    falls back to ``sys.executable``. Returns ``None`` if neither
+    interpreter can import MemPalace.
+    """
+    candidates: list[str] = []
+    p3 = shutil.which("python3")
+    if p3:
+        candidates.append(p3)
+    if sys.executable and sys.executable not in candidates:
+        candidates.append(sys.executable)
+
+    for python in candidates:
+        try:
+            proc = subprocess.run(
+                [python, "-c", "import mempalace.mcp_server"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            continue
+        if proc.returncode == 0:
+            return python
+    return None
 
 
-_HAS_MEMPALACE = _mempalace_importable()
+_MEMPALACE_PYTHON = _detect_mempalace_python()
 
 
 @pytest.mark.skipif(
-    not _HAS_MEMPALACE,
+    _MEMPALACE_PYTHON is None,
     reason="MemPalace not installed on this host — unit tests cover the adapter",
 )
 def test_real_mempalace_write_search_roundtrip(tmp_path: Path) -> None:
@@ -56,7 +73,14 @@ def test_real_mempalace_write_search_roundtrip(tmp_path: Path) -> None:
     # Isolate: write into tmp dir, not the user's real palace.
     env["MEMPALACE_PALACE_PATH"] = str(tmp_path / "palace")
 
-    a = StdioMemPalaceAdapter(env=env, handshake_timeout_s=15.0, call_timeout_s=20.0)
+    # _MEMPALACE_PYTHON is None-guarded by skipif; assert for type narrowing.
+    assert _MEMPALACE_PYTHON is not None
+    a = StdioMemPalaceAdapter(
+        command=(_MEMPALACE_PYTHON, "-m", "mempalace.mcp_server"),
+        env=env,
+        handshake_timeout_s=15.0,
+        call_timeout_s=20.0,
+    )
     try:
         res = a.write(
             content="itsme smoke: stdio adapter real-binary roundtrip",

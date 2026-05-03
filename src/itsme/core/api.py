@@ -391,20 +391,34 @@ def build_default_memory(
     config without leaking pydantic / sqlite plumbing into the MCP
     layer.
 
-    Backend selection (when *adapter* is not passed):
+    Backend selection (when *adapter* is not passed) keys off
+    ``$ITSME_MEMPALACE_BACKEND``:
 
-    * ``$ITSME_MEMPALACE_BACKEND=stdio`` → spawn a real MemPalace MCP
-      server via :class:`StdioMemPalaceAdapter`. This is the v0.0.1 GA
-      wiring — drawers survive MCP restarts.
-    * ``$ITSME_MEMPALACE_BACKEND=inmemory`` (default for now) → in-
-      process adapter. Drawers vanish on restart; documented gap.
-    * ``$ITSME_MEMPALACE_BACKEND=auto`` → try ``stdio``; on
-      :class:`MemPalaceConnectError` fall back to ``inmemory`` with a
-      ``stderr`` warning. Used by ``build_default_memory`` callers that
-      want the best available backend without a hard install dep.
+    * ``inmemory`` (**default**) → in-process
+      :class:`InMemoryMemPalaceAdapter`. **Drawers do NOT survive MCP
+      server restarts** — the events ring is persistent but the adapter
+      is RAM-only, so cross-session ``ask`` quietly returns nothing.
+      This is fine for tests / dev / first-cut usage; it is the v0.0.1
+      known gap.
+    * ``stdio`` → spawn a real MemPalace MCP server via
+      :class:`StdioMemPalaceAdapter`. Drawers persist. Requires
+      ``mempalace`` to be importable in the same Python (e.g.
+      ``uv pip install mempalace``).
+    * ``auto`` → try ``stdio``; on
+      :class:`~itsme.core.adapters.MemPalaceConnectError` fall back to
+      ``inmemory`` with a ``stderr`` warning. Best for shipped builds
+      that should "just work" when MemPalace is around without
+      hard-failing when it isn't.
 
-    Flipping the default to ``auto`` happens in a separate PR once this
-    adapter has real-world hours — conservative launch.
+    The default stays at ``inmemory`` for one more release so the
+    persistent backend can accumulate dogfood hours before becoming the
+    silent default. Operators who want persistence today should set::
+
+        export ITSME_MEMPALACE_BACKEND=auto   # or stdio for hard-fail
+
+    See also :class:`StdioMemPalaceAdapter.from_env` for the
+    ``ITSME_MEMPALACE_*`` knobs that tune the subprocess (command,
+    handshake / call timeouts).
     """
     bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
     if adapter is None:

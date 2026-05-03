@@ -159,6 +159,11 @@ class StdioMemPalaceAdapter:
         self._stderr_thread: threading.Thread | None = None
 
         try:
+            # Merge — not replace — the parent env. Callers usually want
+            # to override one var (e.g. ``MEMPALACE_PALACE_PATH``); they
+            # should NOT have to also re-pass ``PATH``, ``PYTHONPATH``,
+            # ``HOME``, etc. ``None`` still means "inherit unchanged".
+            child_env = {**os.environ, **dict(env)} if env is not None else None
             self._proc = subprocess.Popen(  # noqa: S603 — argv is operator-controlled
                 cmd,
                 stdin=subprocess.PIPE,
@@ -166,7 +171,7 @@ class StdioMemPalaceAdapter:
                 stderr=subprocess.PIPE,
                 bufsize=1,  # line-buffered: matches NDJSON framing
                 text=True,
-                env=dict(env) if env is not None else None,
+                env=child_env,
             )
         except OSError as exc:
             raise MemPalaceConnectError(f"failed to spawn {cmd!r}: {exc}") from exc
@@ -306,13 +311,17 @@ class StdioMemPalaceAdapter:
 
         result = self._call_tool("mempalace_search", args)
 
-        # MemPalace returns ``{"error": ...}`` on missing palace. We
-        # treat that as "no hits" — the alternative would be to crash
-        # ``ask`` for users who haven't initialised a palace yet, which
-        # is worse UX than an empty answer.
-        if "error" in result and "results" not in result:
-            _logger.debug("itsme: mempalace_search returned error=%r", result["error"])
-            return []
+        # MemPalace returns ``{"error": "No palace found ..."}`` when the
+        # user's palace hasn't been initialised yet — that's the only
+        # error we want to silently treat as "no hits". Anything else
+        # (mis-typed wing/room arg, ChromaDB blew up, etc.) should bubble
+        # up so ``ask`` can surface it instead of pretending to be empty.
+        error = result.get("error")
+        if error is not None:
+            if isinstance(error, str) and error.startswith("No palace found"):
+                _logger.debug("itsme: mempalace_search empty-palace: %r", error)
+                return []
+            raise MemPalaceConnectError(f"mempalace_search failed: {error!r}")
 
         hits: list[MemPalaceHit] = []
         for raw in result.get("results", [])[:limit]:
@@ -482,9 +491,15 @@ class StdioMemPalaceAdapter:
         thread.start()
         thread.join(timeout=timeout_s)
         if thread.is_alive():
-            # We can't kill a Python thread; the subprocess is the source
-            # of the hang. Surface it as a connect error and leave the
-            # subprocess to be cleaned up on close.
+            # The reader is stuck in ``stdout.readline()``. Python can't
+            # cancel a thread, so kill the subprocess (which closes
+            # stdout) — that unblocks the readline, the thread observes
+            # EOF, returns, and we join it. Without this teardown the
+            # leaked thread would race with the next request's reader for
+            # the next response line, causing wedged-looking failures
+            # that are murder to debug.
+            self._terminate_quietly()
+            thread.join(timeout=1.0)
             raise MemPalaceConnectError(f"mempalace did not respond within {timeout_s}s")
         if err:
             raise MemPalaceConnectError(f"reading mempalace stdout raised: {err[0]}") from err[0]

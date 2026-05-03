@@ -177,24 +177,27 @@ def test_search_zero_limit_short_circuits(adapter: StdioMemPalaceAdapter) -> Non
 def test_search_empty_palace_returns_empty_list(
     adapter: StdioMemPalaceAdapter,
 ) -> None:
-    """A ``{"error": "No palace found ..."}`` response = zero hits, not a crash."""
-    # The fake exposes a special tool that returns that exact shape.
-    # We call it through the raw JSON-RPC path to exercise the branch.
-    raw = adapter._call_tool("mempalace_empty_palace", {})  # noqa: SLF001 — test hook
-    assert "error" in raw
-    # And confirm the user-facing search() treats the same shape as [].
-    # To exercise the actual search codepath we need the server to return
-    # the error for mempalace_search; force that with the same pattern by
-    # leaving drawers empty and querying the empty fake.
-    fresh = _spawn()
-    try:
-        # No drawers yet → no matches, but this is the "results:[]" path,
-        # not the "error" path. The error path was validated above via
-        # the raw call.
-        hits = fresh.search("anything")
-        assert hits == []
-    finally:
-        fresh.close()
+    """``{"error": "No palace found ..."}`` from ``mempalace_search`` → []."""
+    # Drive the actual search() codepath, not just the raw _call_tool —
+    # the fake routes wing="__no_palace__" to the benign error payload so
+    # we exercise the ``error.startswith("No palace found")`` branch
+    # end-to-end.
+    hits = adapter.search("anything", wing="__no_palace__")
+    assert hits == []
+
+
+def test_search_unknown_error_raises_connect_error(
+    adapter: StdioMemPalaceAdapter,
+) -> None:
+    """An *unknown* search error must NOT be silenced — bubbles to caller.
+
+    Whitelisting only "No palace found" is intentional: ChromaDB blow-up,
+    mis-typed args, etc. should surface as failures rather than be
+    quietly converted to an empty result list (which would make ``ask``
+    pretend the palace had no hits).
+    """
+    with pytest.raises(MemPalaceConnectError, match="ChromaDB exploded"):
+        adapter.search("whatever", wing="__boom__")
 
 
 # --------------------------------------------------------------- error paths

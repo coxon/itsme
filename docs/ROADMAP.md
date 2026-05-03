@@ -210,11 +210,18 @@
 ## Critical Path（v0.0.1）
 
 ```
-T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.15 ─► T1.17,T1.17b ─► T1.20
-        (events)     (MCP surface)               (adapter) (router) (CC hooks)      (smoke)
+T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.13.5 ─► T1.15 ─► T1.17,T1.17b ─► T1.20
+        (events)     (MCP surface)               (adapter)  (persist) (router) (CC hooks)      (smoke)
 ```
 
 T1.14 / T1.18 (Codex) / T1.19 / T1.21 / T1.22 与主路径并行。
+
+**v0.0.1 GA 验收必须满足**：
+
+- 三动词 (`remember` / `ask` / `status`) 在 CC 里走通；
+- T1.20 smoke（自动 + 手动 runbook）全绿；
+- T1.13.5 持久化 backend 可用：操作者通过 `$ITSME_MEMPALACE_BACKEND={stdio,auto}` 切换后，drawer 跨 MCP server 重启可读回（默认仍 `inmemory` 以保持 0-依赖装载体验，但 GA 路径必须能切换且失败显式 — `MemPalaceConnectError` / `MemPalaceWriteError`，不静默吞）；
+- `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_loss_v001_known_gap` 在默认翻 `auto` 时会自动翻红，强制 docs/ROADMAP 同步更新。
 
 ---
 

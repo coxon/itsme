@@ -102,6 +102,14 @@ def _handle_search(args: dict) -> dict:
     limit = int(args.get("limit", 5))
     wing = args.get("wing")
     room = args.get("room")
+    # Two error escape hatches keyed off magic wings, used by
+    # test_mempalace_stdio.py to drive the search() error branches:
+    # * ``__no_palace__`` → benign "No palace found" → search() == []
+    # * ``__boom__``      → unrelated error string → search() raises
+    if wing == "__no_palace__":
+        return {"error": "No palace found at ~/.mempalace/default"}
+    if wing == "__boom__":
+        return {"error": "ChromaDB exploded mid-query"}
     # Cheap substring scoring so the tests can assert deterministic order.
     scored: list[tuple[float, dict]] = []
     for d in _DRAWERS:
