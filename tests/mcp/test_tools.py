@@ -110,11 +110,22 @@ def test_status_handler_json_format(memory: Memory) -> None:
 
 
 def test_status_handler_feed_format(memory: Memory) -> None:
-    """Feed format returns a multi-line string under 'feed' key."""
+    """Feed format returns a human-readable multi-line string + summary header.
+
+    T1.22 contract: ``feed`` carries one line per event with a typed
+    tag (``raw``/``stored``/``routed``/``dedup``/``query``); ``summary``
+    is a one-line counts header for the IDE to render at the top.
+    """
     remember_handler(memory, content="x", kind="fact")
     out = status_handler(memory, scope="recent", format="feed")
     assert "feed" in out and isinstance(out["feed"], str)
-    assert "raw.captured" in out["feed"]
+    assert "summary" in out and isinstance(out["summary"], str)
+    # One remember produces raw + routed + stored — all should appear.
+    assert "raw" in out["feed"]
+    assert "routed" in out["feed"]
+    assert "stored" in out["feed"]
+    # Summary line tallies what fired.
+    assert "raw" in out["summary"] and "stored" in out["summary"]
 
 
 def test_status_handler_rejects_unknown_scope(memory: Memory) -> None:
