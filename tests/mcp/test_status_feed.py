@@ -294,6 +294,40 @@ def test_summary_line_handles_empty_window() -> None:
     assert _feed_summary_line([]) == "0 events"
 
 
+def test_summary_line_buckets_curated_by_reason_not_event_type() -> None:
+    """A future ``reason="rewrite"`` curated must not roll up under "dedup".
+
+    CR PR#13 r1: the line renderer already distinguishes by
+    ``payload["reason"]``; the summary header has to do the same so
+    forward-compat curated reasons (rewrite, demote …) don't get
+    silently mis-attributed when v0.0.2/0.0.3 starts emitting them.
+    """
+    events = [
+        _evt("memory.curated", payload={"reason": "dedup"}),
+        _evt("memory.curated", payload={"reason": "dedup"}),
+        _evt("memory.curated", payload={"reason": "rewrite"}),
+    ]
+    line = _feed_summary_line(events)
+    assert line.startswith("3 events")
+    assert "2 dedup" in line
+    assert "1 curated" in line
+    # The "dedup" label must NOT also count the rewrite one.
+    assert "3 dedup" not in line
+
+
+def test_summary_line_no_curated_bucket_when_only_dedup() -> None:
+    """Pure-dedup windows still skip the (zero) ``curated`` bucket.
+
+    Pinned: today's v0.0.1 only emits ``reason="dedup"`` — the new
+    ``curated`` bucket must stay invisible until a non-dedup curated
+    reason actually fires.
+    """
+    events = [_evt("memory.curated", payload={"reason": "dedup"})]
+    line = _feed_summary_line(events)
+    assert "1 dedup" in line
+    assert "curated" not in line
+
+
 # ============================================================
 # Integration via status_handler — end-to-end through Memory
 # ============================================================

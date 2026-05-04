@@ -162,20 +162,34 @@ def _feed_summary_line(events: list[StatusEvent]) -> str:
     "12 events · 4 raw · 3 stored · 1 dedup · 1 query · 0 other"
     Skips zero-count buckets *except* the totals — operators care
     most about which buckets fired.
+
+    ``memory.curated`` is bucketed by ``payload["reason"]`` rather
+    than the bare event type so future curated reasons (rewrite,
+    demote, …) don't get silently rolled up under "dedup".
+    v0.0.1 only emits ``reason="dedup"``, but the line renderer
+    already distinguishes — the header should too.
     """
     if not events:
         return "0 events"
     counts: Counter[str] = Counter(e.type for e in events)
+    dedup_count = sum(
+        1 for e in events if e.type == "memory.curated" and e.payload.get("reason") == "dedup"
+    )
+    curated_other_count = sum(
+        1 for e in events if e.type == "memory.curated" and e.payload.get("reason") != "dedup"
+    )
     total = sum(counts.values())
     bits = [f"{total} events"]
-    for label, etype in (
-        ("raw", "raw.captured"),
-        ("stored", "memory.stored"),
-        ("dedup", "memory.curated"),  # v0.0.1: curated == dedup
-        ("query", "memory.queried"),
-        ("routed", "memory.routed"),
+    # Order = visual scan priority: producer activity first, then
+    # writes, then dedup-vs-other curated, then queries, then routing.
+    for label, n in (
+        ("raw", counts.get("raw.captured", 0)),
+        ("stored", counts.get("memory.stored", 0)),
+        ("dedup", dedup_count),
+        ("curated", curated_other_count),
+        ("query", counts.get("memory.queried", 0)),
+        ("routed", counts.get("memory.routed", 0)),
     ):
-        n = counts.get(etype, 0)
         if n:
             bits.append(f"{n} {label}")
     return " · ".join(bits)
