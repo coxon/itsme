@@ -1,18 +1,41 @@
-"""``status(scope?, format?)`` — observability feed (T1.12).
+"""``status(scope?, format?)`` — observability feed (T1.12 + T1.22).
 
-Surfaces recent events. v0.0.1 returns JSON or a small newline-
-separated feed string; richer formats (Markdown, OTLP) come later.
+Surfaces recent events from the bus ring. Two formats:
+
+* ``format='json'`` — :class:`itsme.core.StatusResult` as a dict.
+  Stable wire shape; consumers (dashboards, tests) get every event
+  field verbatim.
+* ``format='feed'`` — a small dict with ``scope`` / ``count`` /
+  ``summary`` / ``feed``. ``feed`` is a multi-line string designed
+  to be readable when the IDE (CC / Codex) renders the tool result
+  inline in the transcript. T1.22 makes this format actually
+  human-friendly: per-event-type rendering with content snippets,
+  drawer prefixes, dedup callouts, and a one-line summary header.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Literal, cast
 
 from itsme.core import Memory
+from itsme.core.api import StatusEvent
 
 #: Hard upper bound on a single ``status`` request — keeps the feed
 #: rendering and the JSON payload bounded for MCP transport.
 MAX_LIMIT = 500
+
+#: Max characters of ``content`` we splice into a feed line. Keeps a
+#: 20-event feed comfortably under ~2KB even when every line carries
+#: a snippet, and matches the "one-line in the transcript" goal.
+_FEED_CONTENT_SNIPPET = 80
+
+#: How many trailing chars of ``drawer_id`` / event ids we surface in
+#: the feed. ULIDs share their leading 10 chars within the same second
+#: (timestamp prefix) so a head-prefix would render look-alike ids in a
+#: bursty session; the trailing 8 chars are entropy and distinguish by
+#: eye in a 20-event window without dominating the line.
+_FEED_ID_SUFFIX = 8
 
 
 def status_handler(
@@ -27,15 +50,15 @@ def status_handler(
     Args:
         memory: Process-wide :class:`Memory` instance.
         scope: ``recent`` / ``today`` / ``session``.
-        format: ``json`` (machine-readable) or ``feed`` (newline-
-            joined human-readable strings).
+        format: ``json`` (machine-readable) or ``feed`` (human-readable
+            text designed for the IDE transcript).
         limit: Max events (1 ≤ limit ≤ :data:`MAX_LIMIT`).
 
     Returns:
         For ``format='json'``: :class:`itsme.core.StatusResult` as a
-        dict.  For ``format='feed'``: a small dict with a single
-        ``feed`` key containing a multi-line string. Either way the
-        return type is JSON-serialisable for MCP transport.
+        dict. For ``format='feed'``: a dict with ``scope`` / ``count`` /
+        ``summary`` / ``feed`` keys. Both shapes are JSON-serialisable
+        for MCP transport.
     """
     if not isinstance(scope, str) or scope not in {"recent", "today", "session"}:
         raise ValueError(f"scope must be 'recent' / 'today' / 'session'; got {scope!r}")
@@ -53,21 +76,149 @@ def status_handler(
     )
 
     if format == "feed":
-        lines = [
-            f"{e.ts.isoformat()} [{e.type}] {e.source}: {_feed_summary(e.payload)}"
-            for e in result.events
-        ]
         return {
             "scope": result.scope,
             "count": result.count,
-            "feed": "\n".join(lines),
+            "summary": _feed_summary_line(result.events),
+            "feed": _render_feed(result.events),
         }
     return result.model_dump(mode="json")
 
 
-def _feed_summary(payload: dict[str, Any]) -> str:
-    """Compact one-line summary of an event payload for the feed."""
-    if not payload:
-        return "(no payload)"
-    keys = ", ".join(sorted(payload.keys()))
-    return f"keys={keys}"
+# ---------------------------------------------------------------- rendering
+
+
+def _render_feed(events: list[StatusEvent]) -> str:
+    """Render a list of :class:`StatusEvent` as a human-readable feed.
+
+    Newest-first order is preserved from :meth:`Memory.status`. One
+    line per event; format::
+
+        HH:MM:SS  TAG  one-line summary
+
+    where ``TAG`` is a short, fixed-width-ish indicator picked per
+    event type so the operator can scan the column visually.
+    """
+    if not events:
+        return "(no events in window)"
+    return "\n".join(_render_event(e) for e in events)
+
+
+def _render_event(e: StatusEvent) -> str:
+    """One feed line for a single event. Pure function — easy to test."""
+    when = e.ts.strftime("%H:%M:%S")
+    tag, summary = _render_payload(e.type, e.source, e.payload)
+    return f"{when}  {tag}  {summary}"
+
+
+def _render_payload(  # noqa: C901 — type-dispatch tree is simpler flat
+    event_type: str,
+    source: str,
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    """Return ``(tag, summary)`` for one event.
+
+    Kept as a single dispatch on ``event_type`` rather than a registry
+    so the v0.0.1 surface stays grep-able — there are five types and
+    one default. Adding a new EventType is a one-line edit here.
+    """
+    if event_type == "raw.captured":
+        producer = _short_producer(source, payload)
+        snippet = _content_snippet(payload.get("content"))
+        return ("raw    ", f"<{producer}> {snippet}")
+
+    if event_type == "memory.routed":
+        wing = payload.get("wing", "?")
+        room = payload.get("room", "?")
+        rule = payload.get("rule", "?")
+        return ("routed ", f"→ {wing}/{room}  ({rule})")
+
+    if event_type == "memory.stored":
+        drawer = _short_id(payload.get("drawer_id"))
+        room = payload.get("room", "?")
+        return ("stored ", f"✓ {room} drawer:{drawer}")
+
+    if event_type == "memory.curated":
+        reason = payload.get("reason", "?")
+        if reason == "dedup":
+            drawer = _short_id(payload.get("drawer_id"))
+            producer = payload.get("producer_kind") or "?"
+            return ("dedup  ", f"= <{producer}> → drawer:{drawer}")
+        return ("curated", f"reason={reason}")
+
+    if event_type == "memory.queried":
+        question = _content_snippet(payload.get("question"))
+        n = payload.get("hit_count", "?")
+        return ("query  ", f"? '{question}' → {n} hits")
+
+    # Unknown / future event type — keep it observable with the source
+    # tag rather than dropping silently.
+    return (event_type[:7].ljust(7), f"<{source}>")
+
+
+def _feed_summary_line(events: list[StatusEvent]) -> str:
+    """One-line counts header.
+
+    "12 events · 4 raw · 3 stored · 1 dedup · 1 query · 0 other"
+    Skips zero-count buckets *except* the totals — operators care
+    most about which buckets fired.
+    """
+    if not events:
+        return "0 events"
+    counts: Counter[str] = Counter(e.type for e in events)
+    total = sum(counts.values())
+    bits = [f"{total} events"]
+    for label, etype in (
+        ("raw", "raw.captured"),
+        ("stored", "memory.stored"),
+        ("dedup", "memory.curated"),  # v0.0.1: curated == dedup
+        ("query", "memory.queried"),
+        ("routed", "memory.routed"),
+    ):
+        n = counts.get(etype, 0)
+        if n:
+            bits.append(f"{n} {label}")
+    return " · ".join(bits)
+
+
+# ---------------------------------------------------------------- helpers
+
+
+def _short_id(value: Any) -> str:
+    """Return a short, stable suffix of an id-like value for the feed.
+
+    Suffix not prefix: bus ULIDs share their leading 10 chars within
+    the same second (timestamp portion), so a head-prefix renders
+    visually identical ids in a bursty session.
+    """
+    if not isinstance(value, str) or not value:
+        return "????????"
+    return value[-_FEED_ID_SUFFIX:]
+
+
+def _short_producer(source: str, payload: dict[str, Any]) -> str:
+    """Pick the most informative short label for who emitted a raw.captured.
+
+    Prefer ``producer_kind`` when the producer stamped one (post-T1.19);
+    fall back to the raw ``source`` so older / external producers stay
+    legible.
+    """
+    pk = payload.get("producer_kind")
+    if isinstance(pk, str) and pk:
+        return pk
+    return source or "?"
+
+
+def _content_snippet(content: Any) -> str:
+    """Trim *content* to a single line of ≤ :data:`_FEED_CONTENT_SNIPPET` chars.
+
+    Newlines / tabs are replaced with single spaces so the feed stays
+    one-line-per-event; truncation is marked with an ellipsis so the
+    reader knows the original was longer.
+    """
+    if not isinstance(content, str) or not content:
+        return "(empty)"
+    flat = " ".join(content.split())
+    if len(flat) <= _FEED_CONTENT_SNIPPET:
+        return flat
+    return flat[: _FEED_CONTENT_SNIPPET - 1].rstrip() + "…"

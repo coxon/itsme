@@ -84,7 +84,7 @@
 #### P1 — 验收
 - [x] **T1.20** Smoke test：自动 + 手动两层（`tests/smoke/` 17 项 + `docs/SMOKE.md` 真 CC runbook）。CC 装载、SessionEnd / PreCompact / context-pressure → events ring + router → MemPalace；surfaced T1.13.5 跨重启 drawer 丢失为 v0.0.1 GA blocker。
 - [ ] **T1.21** Codex 装载同样验证
-- [ ] **T1.22** `status()` 能在 IDE 里显示最近 N 条事件
+- [x] **T1.22** `status()` 在 IDE 里能看（`format='feed'` 升级成每事件一行的人类可读 feed：`HH:MM:SS  TAG  one-line summary`，per-event-type 渲染 — `raw.captured` 显 producer_kind + 80字内容片段，`memory.routed` 显 wing/room+rule，`memory.stored`/`memory.curated` 显 8字 drawer **后缀**（前缀都是 ULID 时间戳会撞），`memory.curated reason=dedup` 显被去重的 producer_kind，`memory.queried` 显问题+hit_count；feed 顶上加一条 summary header `12 events · 4 raw · 3 stored · 1 dedup · 1 query` 跳过 0 桶；空窗口显 `(no events in window)` 而不是空串。`format='json'` 完全不动 — 机器消费者拿到的还是原 `StatusResult`。21 个新测试 pin 行格式 / 排序 / 截断 / dedup 可见性 / JSON 不变 contract。）
 
 **v0.0.1 完成定义**：在 CC（或 Codex）里聊一段 → SessionEnd / PreCompact / context-pressure 触发 → MP 里看到 drawer → `ask` 能查回来。
 
@@ -214,7 +214,7 @@ T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.13.5 
         (events)     (MCP surface)               (adapter)  (persist) (router) (CC hooks)      (smoke)
 ```
 
-T1.14 / T1.18 (Codex) / T1.21 / T1.22 与主路径并行（T1.19 已在 critical path 前置完成）。
+T1.14 / T1.18 (Codex) / T1.21 与主路径并行（T1.19 / T1.22 已落地）。
 
 **v0.0.1 GA 验收必须满足**：
 
