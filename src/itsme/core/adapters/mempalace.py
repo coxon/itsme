@@ -86,11 +86,15 @@ class MemPalaceAdapter(Protocol):
 
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
-# CJK Unified Ideographs + extensions A/B + Hiragana + Katakana + Hangul.
-# We tokenize each CJK codepoint individually because there is no
-# whitespace boundary inside CJK runs, and the default ``\w+`` greedy
-# match would swallow an entire sentence as a single token — making
-# substring queries like "紫色独角兽" miss a drawer that contains
+# CJK Unified Ideographs + Extension A + Hiragana + Katakana + Hangul.
+# Extension B (U+20000-U+2A6DF) and beyond are intentionally excluded
+# — they cover rare historical/personal-name kanji that don't appear in
+# typical agent transcripts; if users hit a real query that misses
+# because of this, widen the range here. We tokenize each CJK
+# codepoint individually because there is no whitespace boundary
+# inside CJK runs, and the default ``\w+`` greedy match would swallow
+# an entire sentence as a single token — making substring queries like
+# "紫色独角兽" miss a drawer that contains
 # "紫色独角兽在月光下吃蓝莓松饼" because the lone token never matches
 # the longer one. Per-character tokenization is the cheapest fix that
 # keeps the Jaccard scoring honest for short Asian-language queries;

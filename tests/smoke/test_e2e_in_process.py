@@ -416,12 +416,15 @@ def test_cross_restart_drawer_loss_v001_known_gap(db_path: Path) -> None:
     mem_a.close()
 
     # Session 2: a fresh process opens the same events ring via the
-    # production factory. Today that gives us a fresh empty adapter; the
-    # router's dedup keys off the persistent ring, so it sees
-    # memory.stored already → skips the raw.captured → adapter B stays
-    # empty. Once T1.13.5 swaps the factory's default to the persistent
-    # backend, the same code path will return the drawer and this test
-    # will fail at the assertion below.
+    # production factory. With ``ITSME_MEMPALACE_BACKEND=auto`` (the
+    # post-T1.13.5 default), this lands on the inmemory fallback when
+    # MemPalace isn't on PATH — exactly the CI condition. The router's
+    # dedup keys off the persistent ring, so it sees ``memory.stored``
+    # already → skips the ``raw.captured`` → adapter B stays empty.
+    # Once the test environment provides MemPalace (so the ``auto``
+    # path resolves to the persistent stdio backend), the same code
+    # path will return the drawer and the assertion below will need to
+    # flip to ``len(res.sources) == 1``.
     mem_b = build_default_memory(project="restart", db_path=db_path)
 
     scheduler = WorkerScheduler()
