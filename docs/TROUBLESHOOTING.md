@@ -145,45 +145,63 @@ After this, drawers persist across MCP-server restarts.
 CC immediately calls WebSearch / a different MCP server / nothing
 relevant — never reaches for `mcp__itsme__ask`.
 
-**Why.** Two contributing factors:
+**Why.** Three contributing factors:
 
-1. **Tool selection competition.** If you also have mempalace's CC
+1. **Skill never loaded.** Run `/reload-plugins` in CC. If the output
+   line says `0 skills`, the skill file isn't being discovered. The
+   most common cause is an unrecognized field in
+   `.claude-plugin/plugin.json` — CC silently drops *all* skill
+   loading for the plugin when it hits one (see
+   [r/ClaudeCode bug report][skill-bug] and
+   [claude-skills#538][skill-538]). itsme's `plugin.json` used to
+   declare `"skills": ["./skills/itsme"]`, which is non-standard
+   (CC discovers skills by convention from `skills/<name>/SKILL.md`)
+   — that field was removed in a later patch. If you're on an
+   older install, `/plugin marketplace update itsme && /plugin
+   install itsme@itsme` to pick up the fix.
+2. **Tool selection competition.** If you also have mempalace's CC
    plugin enabled, mempalace exposes ~19 tools that overlap heavily
    with itsme's 3 (`mempalace_search`, `mempalace_get_taxonomy`, …).
    The model picks the more specific-looking name.
-2. **Skill description not strong enough on routing priority.**
+3. **Skill description not strong enough on routing priority.**
    Earlier itsme skill versions described *what* the tools do but not
    *when to prefer them*. The current `skills/itsme/SKILL.md` includes
    a "Tool selection priority" section telling the model to try `ask`
    before WebSearch when the query has any personal angle. If your
    plugin install predates that change, update via the marketplace.
 
+[skill-bug]: https://www.reddit.com/r/ClaudeCode/comments/1qkygri/bug_adding_fields_to_pluginjson_silently_breaks/
+[skill-538]: https://github.com/alirezarezvani/claude-skills/issues/538
+
 **Fix.**
 
-1. **Disable mempalace's CC plugin** (you keep the pip package — itsme
+1. **Confirm the skill is loaded.** After `/reload-plugins`, the count
+   line should include itsme's skill (in CC v2.1.x the skill may be
+   counted under `agents` rather than `skills`; what matters is that
+   the number went up by one when itsme was installed). If it didn't,
+   check `.claude-plugin/plugin.json` for unrecognized fields.
+
+2. **Disable mempalace's CC plugin** (you keep the pip package — itsme
    uses it as a subprocess for storage, but you don't need the 19 raw
-   tools cluttering CC's tool list):
+   tools cluttering CC's tool list). Note: `enabledPlugins[...] =
+   false` in `settings.json` is sometimes ignored by `/reload-plugins`;
+   the reliable path is `/plugin uninstall mempalace@mempalace`:
 
    ```bash
-   /plugin disable mempalace@mempalace
+   /plugin uninstall mempalace@mempalace
+   /reload-plugins
    ```
 
-   or edit `~/.claude/settings.json`:
-   ```json
-   "enabledPlugins": {
-     "mempalace@mempalace": false,
-     "itsme@itsme": true
-   }
-   ```
-
-2. Update itsme:
+3. Update itsme:
    ```bash
    /plugin marketplace update itsme && /plugin install itsme@itsme
    ```
 
-3. If the model *still* skips itsme, you can always force it by being
+4. If the model *still* skips itsme, you can always force it by being
    explicit ("ask itsme: …"). The model isn't broken, it just needs
-   the cue.
+   the cue. Older Opus versions (4.6 and earlier) respect skill
+   descriptions less strongly than 4.7+ — if you're on 4.6, the
+   explicit cue is sometimes the path of least resistance.
 
 ---
 

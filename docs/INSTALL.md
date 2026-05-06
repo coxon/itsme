@@ -69,7 +69,6 @@ includes the full inline `"hooks"` block; one entry shown for shape):
   "name": "itsme",
   "version": "0.0.1a0",
   "description": "Long-term memory plugin for agent IDEs — remember / ask / status",
-  "skills": ["./skills/itsme"],
   "mcpServers": {
     "itsme": {
       "command": "uv",
