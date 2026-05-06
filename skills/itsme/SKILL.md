@@ -1,6 +1,15 @@
 ---
 name: itsme
-description: Long-term memory across sessions. Use remember() to persist important facts/decisions/feelings, ask() to recall, status() to see what was captured recently.
+description: |
+  Long-term memory across sessions. Activate this skill whenever the user
+  references the past ("remember", "what did we", "I told you", "I've been
+  working on", "我之前", "你还记得"), expresses something worth keeping
+  ("decided X", "let's go with Y", "I prefer Z"), or asks a question that
+  might already have a personal answer in memory — even when the question
+  looks like an external fact lookup. Use `ask` BEFORE WebSearch /
+  external lookups when the user might have prior notes on the topic. Use
+  `remember` when a decision, preference, or non-obvious fact lands. Use
+  `status` rarely — it's for debugging.
 version: 0.0.1
 ---
 
@@ -16,6 +25,43 @@ Everything you remember survives across sessions. Everything you forget
 (context compaction, `/clear`, session end) is silently salvaged by
 hooks — but that salvage is a safety net, **not a substitute for
 deliberate writes**.
+
+---
+
+## Tool selection priority — read this first
+
+itsme is **personal memory**. When other tools (WebSearch, file search,
+project search, other MCP servers) are available, the question is
+always: *"is this something the user might already have a stake in?"*
+
+**Always try `ask` first when the query touches:**
+
+- **Anything the user has worked on, decided, or expressed a feeling
+  about.** "我之前的看法 / What did I say about / Why did we pick X"
+  — even if the topic itself is "external" (a company, a library, a
+  technique). The user's *take* on it is private and only itsme has it.
+- **Topics where the user has likely been collecting notes.** "Palantir
+  2026Q1 营收" looks like a public-fact query — but if the user has
+  been tracking Palantir for months, their saved drawer is more
+  relevant than fresh web results. Ask itsme first; fall back to
+  WebSearch only if itsme returns nothing.
+- **Anything phrased in the second person (you/we/I).** "Do you
+  remember", "我们之前讨论过", "我跟你说过" → these are explicitly
+  asking memory, not the open web.
+
+**Skip `ask` and go straight to other tools when:**
+
+- The query is a pure code question with no personal angle ("how does
+  Python's async/await work").
+- The query is about something happening *right now* (live data, news
+  from the last hour) where the user can't have notes yet.
+- The user explicitly redirects ("just search the web", "don't check
+  memory, look it up fresh").
+
+When in doubt, **`ask` is cheap** — a single MCP call returning at
+most 5 hits. Running it before WebSearch costs ~100ms and saves you
+from giving a stale public answer when the user already has a curated
+private one.
 
 ---
 
