@@ -5,7 +5,7 @@ description: |
   WebSearch / external lookups whenever the query mentions a person,
   company, project, library, or topic the user might have notes on —
   even when phrased as a fresh-fact lookup ("最新", "latest", "财报",
-  "earnings", "current price"). The user's stored drawer is often more
+  "earnings"). The user's stored drawer is often more
   authoritative than fresh web results for anything they actively
   track. Activation triggers: past references ("remember", "what did
   we", "I told you", "I've been working on", "我之前", "你还记得"),
