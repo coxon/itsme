@@ -218,7 +218,7 @@ compacted will appear as `raw.captured | hook:before-exit` /
 If you don't want passive capture, set `ITSME_HOOKS_DISABLED=1` in
 your environment.
 
-If you want passive capture but don't want a particular session
-to leak into memory, exit cleanly *before* `/exit` triggers the hook
-— there's no current way to opt out per-session at runtime; that's
-on the v0.0.2 roadmap.
+If you want passive capture in general but not for a particular
+session, there's currently no per-session runtime opt-out — that
+feature is on the v0.0.2 roadmap. For now, launch that one session
+with `ITSME_HOOKS_DISABLED=1` set in its environment.
