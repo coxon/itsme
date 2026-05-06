@@ -1,15 +1,18 @@
 ---
 name: itsme
 description: |
-  Long-term memory across sessions. Activate this skill whenever the user
-  references the past ("remember", "what did we", "I told you", "I've been
-  working on", "我之前", "你还记得"), expresses something worth keeping
-  ("decided X", "let's go with Y", "I prefer Z"), or asks a question that
-  might already have a personal answer in memory — even when the question
-  looks like an external fact lookup. Use `ask` BEFORE WebSearch /
-  external lookups when the user might have prior notes on the topic. Use
-  `remember` when a decision, preference, or non-obvious fact lands. Use
-  `status` rarely — it's for debugging.
+  Long-term personal memory across sessions. ALWAYS call `ask` BEFORE
+  WebSearch / external lookups whenever the query mentions a person,
+  company, project, library, or topic the user might have notes on —
+  even when phrased as a fresh-fact lookup ("最新", "latest", "财报",
+  "earnings"). The user's stored drawer is often more
+  authoritative than fresh web results for anything they actively
+  track. Activation triggers: past references ("remember", "what did
+  we", "I told you", "I've been working on", "我之前", "你还记得"),
+  decisions/preferences worth keeping ("decided X", "let's go with Y",
+  "I prefer Z"), or any second-person framing ("you/we/I"). Use
+  `remember` when a decision, preference, or non-obvious fact lands.
+  Use `status` rarely — it's for debugging.
 version: 0.0.1
 ---
 
@@ -28,6 +31,15 @@ deliberate writes**.
 
 ---
 
+## The one rule
+
+> **Before WebSearch, before external lookups, before answering from
+> training data — if the query touches anything the user might have
+> private notes on, call `ask` first.** It's one cheap MCP call. The
+> stored drawer is the canonical answer; the web is the fallback.
+
+---
+
 ## Tool selection priority — read this first
 
 itsme is **personal memory**. When other tools (WebSearch, file search,
@@ -40,11 +52,10 @@ always: *"is this something the user might already have a stake in?"*
   about.** "我之前的看法 / What did I say about / Why did we pick X"
   — even if the topic itself is "external" (a company, a library, a
   technique). The user's *take* on it is private and only itsme has it.
-- **Topics where the user has likely been collecting notes.** "Palantir
-  2026Q1 营收" looks like a public-fact query — but if the user has
-  been tracking Palantir for months, their saved drawer is more
-  relevant than fresh web results. Ask itsme first; fall back to
-  WebSearch only if itsme returns nothing.
+- **Any named entity the user might be tracking.** A company, ticker,
+  library, paper, person, project — if the user has mentioned it
+  before, they likely have a drawer on it. **Default assumption: yes,
+  they do.** Verify with `ask` before defaulting to a public source.
 - **Anything phrased in the second person (you/we/I).** "Do you
   remember", "我们之前讨论过", "我跟你说过" → these are explicitly
   asking memory, not the open web.
@@ -56,12 +67,60 @@ always: *"is this something the user might already have a stake in?"*
 - The query is about something happening *right now* (live data, news
   from the last hour) where the user can't have notes yet.
 - The user explicitly redirects ("just search the web", "don't check
-  memory, look it up fresh").
+  memory, look it up fresh", "ignore what I said before").
 
 When in doubt, **`ask` is cheap** — a single MCP call returning at
 most 5 hits. Running it before WebSearch costs ~100ms and saves you
 from giving a stale public answer when the user already has a curated
 private one.
+
+---
+
+## Anti-patterns — don't do these
+
+These are the failure modes we've actually observed. Each one looks
+reasonable in isolation but produces a worse answer than `ask`-first.
+
+### ❌ "最新 X" / "latest X" / "current X" → straight to WebSearch
+
+> User: "Palantir 最新的财报怎么样？"
+> Bad: → `WebSearch("Palantir Q1 2026 earnings")`
+> Good: → `ask("Palantir 财报")` **first**, then optionally
+> supplement with WebSearch if the stored notes are stale.
+
+**Why:** "最新 / latest" does **not** override memory priority. The
+user's stored notes about Palantir are often *more* recent and *more*
+relevant than what's on the web — they've been curating this
+specifically. Even if the web has a fresher number, the user's drawer
+contains their *interpretation* of the trend, which is what they
+actually want to hear back.
+
+### ❌ Named entity → answer from training data
+
+> User: "PostgreSQL 16 有什么新特性？"
+> Bad: → answer from training-data knowledge of PG16.
+> Good: → `ask("Postgres 16")` first. The user may have a drawer
+> noting which features they've adopted, which they hit bugs in, etc.
+> *Then* supplement with general knowledge.
+
+**Why:** A correct generic answer is still the wrong answer when the
+user's own notes contradict it or contextualize it differently.
+
+### ❌ "你帮我看看 X" / "tell me about X" → external search
+
+> User: "你帮我看看 Aleph 这个项目"
+> Bad: → web search for "Aleph project".
+> Good: → `ask("Aleph")` first; this is the user's own project.
+
+**Why:** Second-person phrasing (你/we/I) is a strong signal of
+"check what we already have together". Don't go external until memory
+returns empty.
+
+### ❌ Empty `ask` → ask same question 3 different ways
+
+If `ask` returns no hits, **that's the answer**. Don't reformulate and
+retry — the topic genuinely isn't in memory yet. Move on to the next
+tool (WebSearch, file search) or ask the user directly.
 
 ---
 
@@ -191,5 +250,9 @@ higher-quality signal because you chose them deliberately.
 
 ## TL;DR
 
-Write deliberately. Recall before acting. Trust the safety net but
-don't rely on it.
+**`ask` before WebSearch. `ask` before training-data answers.
+`ask` even when the query says "最新 / latest".** The user's
+drawer beats the web for anything they track.
+
+Write deliberately via `remember`. Recall before acting via `ask`.
+Trust the hooks' safety net but don't rely on it.
