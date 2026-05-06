@@ -98,6 +98,19 @@ lives at marketplace root):
 }
 ```
 
+> **Fallback if `"source": "./"` ever stops being accepted.** The CC
+> docs say the source path "Must start with `./`" without explicitly
+> blessing the bare `./` (root-of-marketplace) form, so if a future
+> validator tightens, replace the source with a remote one — the
+> repo is also a valid plugin payload by itself:
+>
+> ```json
+> "source": {"source": "github", "repo": "coxon/itsme"}
+> ```
+>
+> This costs one extra clone per install (CC fetches the marketplace
+> + the plugin separately) but is bulletproof.
+
 Hooks are wired separately at `hooks/hooks.json` (CC's plugin spec
 loads them from the same root). The four hook entries map to four
 shell shims in `hooks/cc/`, each of which dispatches into
