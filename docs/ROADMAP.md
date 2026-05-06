@@ -78,12 +78,12 @@
 #### P0 — Hook
 - [x] **T1.17** CC hook 脚本：`.claude-plugin/plugin.json` 内联 `hooks` 字段（绕开 [anthropics/claude-code#45296](https://github.com/anthropics/claude-code/issues/45296) 的外部 `hooks/hooks.json` 删除 bug）+ `hooks/cc/before-exit.sh` / `before-compact.sh`（CC SessionEnd / PreCompact 触发）。Python 实现：`itsme.hooks.lifecycle`，读 `transcript_path` JSONL 取 tail（默认 10K chars），emit `raw.captured` with `source=hook:before-<x>` + `transcript_ref`。
 - [x] **T1.17b** **Context-pressure hook**（主动式）：CC `UserPromptSubmit` / `PostToolUse` 触发，读 `transcript_path` 估 tokens（`chars/4`），跨阈值（默认 0.70，可配 `$ITSME_CTX_THRESHOLD` / `$ITSME_CTX_MAX`）emit `raw.captured` with `source=hook:context-pressure` + `transcript_ref`。Schmitt-trigger debounce：触发后须 pressure 跌 ≥10% (`disarm_drop`) 才重新 arm，状态持久化到 `~/.itsme/state/pressure-<sid>.json`。比 `before-compact` 早，抢救窗口大（v0.0.2 由 Aleph promoter 消费）。
-- [ ] **T1.18** Codex hook 适配（先调研 Codex 的 hook 接口，按其规范实现）
+- [ ] **T1.18** Codex hook 适配（先调研 Codex 的 hook 接口，按其规范实现）— **优先级下调（2026-05-06）**：v0.0.1 GA 在 CC 上验证完成；T2.0a/b/c 暴露 hook capture 链路本身仍有写侧噪音 + 读侧召回的根问题，先治 CC 这套 → Codex 移植留到 v0.0.2 或之后。
 - [x] **T1.19** hook 与 explicit remember 的去重（`core/dedup.py` 里算 `content_hash = sha256(content.strip())` 与 `producer_kind` 桶，所有 `raw.captured` producer 都打标；router 写前扫 `memory.stored` 的 `content_hash` — 命中就发一个 `memory.curated` with `reason="dedup"` + `original_stored_event_id` 并返回原 drawer。dedup 键故意用 `memory.stored`（post-write）而非 `memory.routed`（pre-write），失败写不会污染后续重试。跨 producer：explicit ↔ hook:lifecycle ↔ hook:context-pressure 同 content 互相 coalesce；stored 只留 1 条，caller 拿到同一个 drawer_id。没引入新 event type — 复用现有 6 个。）
 
 #### P1 — 验收
 - [x] **T1.20** Smoke test：自动 + 手动两层（`tests/smoke/` 17 项 + `docs/SMOKE.md` 真 CC runbook）。CC 装载、SessionEnd / PreCompact / context-pressure → events ring + router → MemPalace；surfaced T1.13.5 跨重启 drawer 丢失为 v0.0.1 GA blocker。**v0.0.1 GA 验收完成（2026-05-06）**：在真实 CC v2.1.119 + 自定义 gateway + mempalace pip 后端 + 内联 hooks (#16) 链路下，`/exit` → `raw.captured | hook:before-exit` → `memory.routed | worker:router` → `memory.stored | adapter:mempalace` 全链路在 `~/.itsme/events.db` 可见；同 session 后续 `ask` 跨 hook-snapshot 命中。dogfood 暴露的两个**配置**坑（非代码 bug）写进 `docs/INSTALL.md` "Real-world setup notes"：`claude --bare` 跳过所有 hooks；自定义 gateway 必须用 `ANTHROPIC_AUTH_TOKEN`（非 `_API_KEY`）。同次给 `skills/itsme/SKILL.md` 加 "Tool selection priority" 强引导，让模型在 WebSearch 等外部工具前先 `ask` itsme — 修复 dogfood 时观察到的 "Palantir 营收" 类 query 直奔 web 而绕过私人记忆的问题。
-- [ ] **T1.21** Codex 装载同样验证
+- [ ] **T1.21** Codex 装载同样验证 — **优先级下调（2026-05-06）**：blocked on T1.18；同 T1.18 一并推迟。
 - [x] **T1.22** `status()` 在 IDE 里能看（`format='feed'` 升级成每事件一行的人类可读 feed：`HH:MM:SS  TAG  one-line summary`，per-event-type 渲染 — `raw.captured` 显 producer_kind + 80字内容片段，`memory.routed` 显 wing/room+rule，`memory.stored`/`memory.curated` 显 8字 drawer **后缀**（前缀都是 ULID 时间戳会撞），`memory.curated reason=dedup` 显被去重的 producer_kind，`memory.queried` 显问题+hit_count；feed 顶上加一条 summary header `12 events · 4 raw · 3 stored · 1 dedup · 1 query` 跳过 0 桶；空窗口显 `(no events in window)` 而不是空串。`format='json'` 完全不动 — 机器消费者拿到的还是原 `StatusResult`。21 个新测试 pin 行格式 / 排序 / 截断 / dedup 可见性 / JSON 不变 contract。）
 - [x] **T1.23** **CC 标准安装路径**（`/plugin marketplace add coxon/itsme` + `/plugin install itsme@itsme`）：仓库自宿一份 `.claude-plugin/marketplace.json`，single-plugin self-host，`"source": "./"` 直接指向 marketplace root（plugin 与 marketplace 共用一个 repo）。`plugin.json` 与 hook shim 全部切到 `uv run --project ${CLAUDE_PLUGIN_ROOT} python -m ...`，由 uv 在插件 cache 目录里自管 venv，去掉对全局 `pip install itsme` / 用户 `$PATH` 上有正确 Python 的依赖。Hook timeout 15/10s 吸收首次冷启动 `uv sync`（~5-10s）开销；steady-state hook 仍是 ~50-100ms uv overhead。symlink dev 模式作为开发者备用路径保留并降级到 INSTALL.md 二级章节。
 
@@ -99,8 +99,16 @@
 
 ### Tasks
 
-#### Pre-Aleph — Router 静默规则（落地 R1 缓解）
+#### Pre-Aleph — Router 静默规则 + 读侧召回修复（落地 R1 缓解 + 2026-05-06 跨 session 验证暴露）
 - [ ] **T2.0** **Router 静默规则**（v0.0.1 dogfood 暴露：每次 hook capture 把 CC 注入的 SKILL.md / `<command-name>` envelope / system prompt 都吞进 `raw.captured`，drawer 噪音 + 搜索召回污染。R1 早识别，但 v0.0.1 没落地缓解）。在 `core/workers/router.py` 写前加 filter 层：识别 CC 注入 boilerplate（`<command-name>...</command-args>` block、SKILL.md 整段注入、system prompt 形态）、低信息 chunk、近窗 hash 重复（T1.19 已覆盖完全相同内容，这里覆盖近似）→ emit `raw.dropped` event（不静默吞，留可观察性，`status` 能看到 dropped reason）→ 不调 `route_and_store`。规则按 plugin 抽成 `core/filters/`：`boilerplate.py` / `low_info.py` / `hash_dup_recent.py` / `system_injection.py`，每条规则可单独开关。**只过滤 hook capture，不过滤 explicit `remember()`**（用户/agent 显式意图 100% 入库）。是否引入 `raw.dropped` 新 event type 待评估（vs 复用 `memory.curated` with `reason="dropped_by_filter"`）。
+  - **T2.0a** **Envelope 过滤**：去掉 `<local-command-caveat>` / `<command-name>` / `<command-message>` / `<command-args>` / `<local-command-stdout>` 五件套块（CC 在 `/exit` 等 slash command 触发时注入到 transcript 的 control envelope，不是用户语义内容）。
+  - **T2.0b-write** **Turn 切片**：当前 `hook:lifecycle.before-exit` 把整个 transcript tail 拼成 **一个** ~2000 token 的 `raw.captured`，包含用户提问 + assistant 答复 + envelope 全部混合。改为按 turn（user / assistant 各 1 段）切成多条 `raw.captured`，每条独立 `content_hash` 和 `producer_kind`。理由见 T2.0c：长 drawer 是召回失败的根因之一。
+- [ ] **T2.0c** **读侧召回修复**（2026-05-06 跨 session 验证新暴露）。**症状**：hook capture 写入成功（drawer 在 `room_general`、content_hash 算了），但 verbatim ranker 用单/双 token 短查询（`Apollo` / `Warfighter OS` / `断联战区无人机`）召回 0 hit；同 session 用同样 ranker 查 ~30 token 的 `Verify-decision` drawer 能拿 score 0.29。**诊断**：长 drawer（~2000 token markdown blob）+ 短 query → ranker 当前 `matched / total` 公式被文档长度稀释到阈值下；同时 markdown 修饰（`**Apollo**` / `| Apollo |`）的分词没处理，命中受影响。**修复**：
+  - 长度归一：分母改用 `sqrt(doc_tokens)` 或类似次线性公式，避免短 query 在长文档上被稀释（`InMemoryMemPalaceAdapter` + `mempalace_stdio` 的 ranker 都要改）
+  - Markdown 预处理：tokenizer 把 `*` / `_` / `|` / `` ` `` 当分隔符（继 T1.13.5 CJK 修复后第二轮分词器升级）
+  - 最低分阈值：避免 `zxqvbn-12345` 这种全失配 query 也返回 score 0.04 的尾巴（hit_count 失真）
+  - 回归：以今天 12:57 那条 raw_event（`01KQYNTJS3A47E2AZXE0YR5552`，含 Apollo / Warfighter OS / 断联战区无人机 三个 verbatim token）为 fixture，pin 修复前后召回行为
+  - 关系：T2.0a/b 治源（drawer 别那么大那么脏），T2.0c 治末（就算 drawer 偶尔大也能查得出）。两边都做。
 
 #### Aleph 核心 — 数据模型 & 存储
 - [ ] **T2.1** `core/aleph/types.py`：`WikiEntry` / `Claim` / `Reference` 数据类
