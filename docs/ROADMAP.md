@@ -107,7 +107,7 @@
   - 长度归一：分母改用 `sqrt(doc_tokens)` 或类似次线性公式，避免短 query 在长文档上被稀释（`InMemoryMemPalaceAdapter` + `mempalace_stdio` 的 ranker 都要改）
   - Markdown 预处理：tokenizer 把 `*` / `_` / `|` / `` ` `` 当分隔符（继 T1.13.5 CJK 修复后第二轮分词器升级）
   - 最低分阈值：避免 `zxqvbn-12345` 这种全失配 query 也返回 score 0.04 的尾巴（hit_count 失真）
-  - 回归：以今天 12:57 那条 raw_event（`01KQYNTJS3A47E2AZXE0YR5552`，含 Apollo / Warfighter OS / 断联战区无人机 三个 verbatim token）为 fixture，pin 修复前后召回行为
+  - 回归：以 2026-05-06 12:57 UTC 那条 raw_event（`01KQYNTJS3A47E2AZXE0YR5552`，含 Apollo / Warfighter OS / 断联战区无人机 三个 verbatim token）为 fixture，pin 修复前后召回行为
   - 关系：T2.0a/b 治源（drawer 别那么大那么脏），T2.0c 治末（就算 drawer 偶尔大也能查得出）。两边都做。
 
 #### Aleph 核心 — 数据模型 & 存储
@@ -226,7 +226,7 @@ T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.13.5 
         (events)     (MCP surface)               (adapter)  (persist) (router) (CC hooks)      (smoke)
 ```
 
-T1.14 / T1.18 (Codex) / T1.21 与主路径并行（T1.19 / T1.22 / T1.23 已落地）。
+T1.14 / T1.18 (Codex) / T1.21 与主路径并行；其中 T1.18 / T1.21 已于 2026-05-06 下调优先级，待 T2.0a/b/c 收敛后再推进（T1.19 / T1.22 / T1.23 已落地）。
 
 **v0.0.1 GA 验收必须满足**：
 
