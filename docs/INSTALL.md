@@ -61,7 +61,8 @@ picks them up without restart.
 
 ### Plugin manifest shape
 
-`.claude-plugin/plugin.json` (the version in this repo):
+`.claude-plugin/plugin.json` (excerpt — the version in this repo
+includes the full inline `"hooks"` block; one entry shown for shape):
 
 ```json
 {
@@ -77,6 +78,21 @@ picks them up without restart.
         "python", "-m", "itsme.mcp.server"
       ]
     }
+  },
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cc/before-exit.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+    // PreCompact, UserPromptSubmit, PostToolUse follow the same shape
+    // — see the file in this repo for the full block.
   }
 }
 ```
