@@ -1,0 +1,24 @@
+{
+  "name": "itsme",
+  "description": "Long-term memory plugin for agent IDEs — remember / ask / status",
+  "owner": {
+    "name": "coxon",
+    "url": "https://github.com/coxon/itsme"
+  },
+  "plugins": [
+    {
+      "name": "itsme",
+      "source": "./",
+      "description": "Long-term memory: remember / ask / status, with passive capture hooks (SessionEnd / PreCompact / context-pressure).",
+      "version": "0.0.1a0",
+      "author": {
+        "name": "coxon",
+        "url": "https://github.com/coxon"
+      },
+      "homepage": "https://github.com/coxon/itsme",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["memory", "mcp", "mempalace", "aleph"]
+    }
+  ]
+}

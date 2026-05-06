@@ -11,8 +11,15 @@
   "skills": ["./skills/itsme"],
   "mcpServers": {
     "itsme": {
-      "command": "python",
-      "args": ["-m", "itsme.mcp.server"]
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "python",
+        "-m",
+        "itsme.mcp.server"
+      ]
     }
   }
 }

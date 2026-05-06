@@ -8,7 +8,7 @@
 
 | IDE | Plugin mechanism | Hooks (CC event → script) | Status |
 |---|---|---|---|
-| **Claude Code** | `~/.claude/plugins/<name>` symlink | `SessionEnd=before-exit`, `PreCompact=before-compact`, `UserPromptSubmit`/`PostToolUse=context-pressure` | ✅ v0.0.1 |
+| **Claude Code** | `/plugin marketplace add coxon/itsme` (or `~/.claude/plugins/<name>` symlink for dev) | `SessionEnd=before-exit`, `PreCompact=before-compact`, `UserPromptSubmit`/`PostToolUse=context-pressure` | ✅ v0.0.1 |
 | **Codex** | TBD (driven by T1.18) | semantic equivalents | ⏳ v0.0.1 |
 | Cursor / Continue / others | — | — | not planned (v0.0.5+) |
 
@@ -16,23 +16,48 @@
 
 ## Claude Code
 
-### Install (alpha — local clone)
+### Install (recommended — CC plugin marketplace)
+
+itsme is its own marketplace (`.claude-plugin/marketplace.json` at
+the repo root lists exactly one plugin: itsme itself), so the CC
+standard two-step works:
+
+```text
+/plugin marketplace add coxon/itsme
+/plugin install itsme@itsme
+```
+
+Subsequent updates:
+
+```text
+/plugin marketplace update itsme    # pull catalog metadata
+/plugin install itsme@itsme         # re-install at the new pinned version
+```
+
+CC also runs auto-updates in the background at startup.
+
+**Prerequisite**: [`uv`](https://docs.astral.sh/uv/) on `$PATH`. The
+MCP server is launched as `uv run --project ${CLAUDE_PLUGIN_ROOT}
+python -m itsme.mcp.server`, so uv handles dep resolution from the
+plugin's own `pyproject.toml` — no global `pip install itsme` is
+needed. First boot pays a one-time `uv sync` (~5-10s); subsequent
+spawns reuse the cached venv.
+
+### Install (developer mode — local clone + symlink)
+
+For hacking on itsme:
 
 ```bash
 git clone https://github.com/coxon/itsme
 cd itsme
-uv sync                     # or: pip install -e .
+uv sync
 
-# Wire into CC
 mkdir -p ~/.claude/plugins
-ln -s "$(pwd)" ~/.claude/plugins/itsme
+ln -snf "$PWD" ~/.claude/plugins/itsme
 ```
 
-Restart CC. The plugin manifest (`.claude-plugin/plugin.json`) is
-discovered automatically.
-
-> A future `cc plugin install https://github.com/coxon/itsme`
-> path is on the v0.0.5+ roadmap once we ship a real wheel.
+Restart CC. Source edits flow through immediately; `/reload-plugins`
+picks them up without restart.
 
 ### Plugin manifest shape
 
@@ -46,17 +71,37 @@ discovered automatically.
   "skills": ["./skills/itsme"],
   "mcpServers": {
     "itsme": {
-      "command": "python",
-      "args": ["-m", "itsme.mcp.server"]
+      "command": "uv",
+      "args": [
+        "run", "--project", "${CLAUDE_PLUGIN_ROOT}",
+        "python", "-m", "itsme.mcp.server"
+      ]
     }
   }
+}
+```
+
+`.claude-plugin/marketplace.json` (single-plugin self-host, plugin
+lives at marketplace root):
+
+```json
+{
+  "name": "itsme",
+  "owner": {"name": "coxon", "url": "https://github.com/coxon/itsme"},
+  "plugins": [
+    {
+      "name": "itsme",
+      "source": "./",
+      "version": "0.0.1a0"
+    }
+  ]
 }
 ```
 
 Hooks are wired separately at `hooks/hooks.json` (CC's plugin spec
 loads them from the same root). The four hook entries map to four
 shell shims in `hooks/cc/`, each of which dispatches into
-`python -m itsme.hooks <name>`.
+`uv run --project ${CLAUDE_PLUGIN_ROOT} python -m itsme.hooks <name>`.
 
 ### Hook contract
 
@@ -67,14 +112,16 @@ Each shim:
 - Always exits 0. Hook failures are logged to stderr; surfacing them
   as non-zero exits would render in the CC UI as red errors, which
   is the wrong UX for a passive-capture plugin.
-- Never blocks the IDE: timeouts (3-5s per hook) are configured in
-  `hooks/hooks.json`.
+- Never blocks the IDE: timeouts (10-15s per hook) are configured in
+  `hooks/hooks.json`. Timeouts are higher than they need to be in
+  steady state to absorb the one-time cold-start `uv sync` if a
+  hook fires before the MCP server has been activated.
 
 ```bash
 # hooks/cc/before-exit.sh
 #!/usr/bin/env bash
 set -u
-python -m itsme.hooks before-exit
+exec uv run --project "${CLAUDE_PLUGIN_ROOT}" python -m itsme.hooks before-exit
 ```
 
 ### Disable temporarily
