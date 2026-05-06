@@ -86,10 +86,49 @@ class MemPalaceAdapter(Protocol):
 
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+# CJK Unified Ideographs + extensions A/B + Hiragana + Katakana + Hangul.
+# We tokenize each CJK codepoint individually because there is no
+# whitespace boundary inside CJK runs, and the default ``\w+`` greedy
+# match would swallow an entire sentence as a single token — making
+# substring queries like "紫色独角兽" miss a drawer that contains
+# "紫色独角兽在月光下吃蓝莓松饼" because the lone token never matches
+# the longer one. Per-character tokenization is the cheapest fix that
+# keeps the Jaccard scoring honest for short Asian-language queries;
+# proper bigram / morphological tokenization belongs in the real
+# MemPalace adapter (which uses embeddings anyway).
+_CJK_RE = re.compile(
+    r"[\u3040-\u309f"  # Hiragana
+    r"\u30a0-\u30ff"  # Katakana
+    r"\u3400-\u4dbf"  # CJK Extension A
+    r"\u4e00-\u9fff"  # CJK Unified Ideographs
+    r"\uac00-\ud7af"  # Hangul Syllables
+    r"]"
+)
 
 
 def _tokens(text: str) -> set[str]:
-    return {t.lower() for t in _TOKEN_RE.findall(text)}
+    """Split *text* into a token set for Jaccard overlap scoring.
+
+    Latin / Cyrillic / numeric runs use the standard ``\\w+`` boundary;
+    CJK characters are emitted one codepoint at a time so that a query
+    of N characters can hit a drawer whose CJK run is longer than N.
+    """
+    out: set[str] = set()
+    for raw in _TOKEN_RE.findall(text):
+        # If the run is entirely CJK, fan it out per-character. Otherwise
+        # keep it as a single Latin/numeric token (lowercased).
+        cjk_chars = _CJK_RE.findall(raw)
+        if cjk_chars and len(cjk_chars) == len(raw):
+            out.update(cjk_chars)
+        elif cjk_chars:
+            # Mixed run (e.g. "v0.0.1版本"): emit both the lowercase whole
+            # token (so "版本" → matches the run via shared per-char tokens
+            # below) AND each CJK char individually.
+            out.add(raw.lower())
+            out.update(cjk_chars)
+        else:
+            out.add(raw.lower())
+    return out
 
 
 class _Drawer(BaseModel):

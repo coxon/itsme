@@ -381,29 +381,33 @@ def test_hook_noop_when_disabled(
 
 
 # -------------------------------------- 10. cross-MCP-restart drawer loss
-# This documents a v0.0.1 known gap: ``InMemoryMemPalaceAdapter`` is RAM
-# only, so when the MCP server restarts the drawers vanish — but the
-# router's dedup key (``memory.stored`` events) lives in the persistent
-# ring, so the new server skips the re-route. Net effect: drawer is
-# silently lost across CC sessions.
+# This documents a v0.0.1 known gap when MemPalace is *not* installed
+# alongside itsme: ``InMemoryMemPalaceAdapter`` is RAM only, so when the
+# MCP server restarts the drawers vanish — but the router's dedup key
+# (``memory.stored`` events) lives in the persistent ring, so the new
+# server skips the re-route. Net effect: drawer is silently lost across
+# CC sessions.
 #
-# The fix is T1.13.5 (wire stdio MemPalace MCP-client adapter). Until
-# then, this test asserts the LOSSY behavior — when T1.13.5 lands, the
-# test will start failing and we flip the assertions.
+# Originally this gap blocked persistence unconditionally because
+# ``build_default_memory`` defaulted to ``inmemory``. After flipping the
+# default to ``auto`` (this PR), the gap only manifests when MemPalace
+# is missing from the environment — which is exactly the case in CI, so
+# the test still asserts the lossy behavior. Once the test environment
+# itself starts shipping with MemPalace (or once we mock the stdio
+# adapter into ``build_default_memory`` here), the assertion will need
+# to flip.
 
 
 def test_cross_restart_drawer_loss_v001_known_gap(db_path: Path) -> None:
-    """v0.0.1 known gap — drawer lost across MCP server restart.
-
-    Tracked: ROADMAP T1.13.5 (stdio MemPalace MCP-client backend). When
-    T1.13.5 lands and is wired into ``build_default_memory``, this test
-    will fail loudly so we remember to flip its semantics.
+    """v0.0.1 known gap — drawer lost across MCP server restart when
+    MemPalace isn't installed.
 
     Critically, both processes go through ``build_default_memory`` (the
-    same factory the MCP server uses) — NOT a hand-rolled ``Memory(...,
-    adapter=InMemoryMemPalaceAdapter())``. That way when T1.13.5 swaps
-    the factory's default adapter to the persistent backend, this test
-    flips automatically.
+    same factory the MCP server uses). With the post-T1.13.5 default of
+    ``ITSME_MEMPALACE_BACKEND=auto``, this lands on the inmemory
+    fallback when MemPalace isn't on PATH (the CI condition). Once test
+    fixtures provide MemPalace, this test will fail and the assertion
+    flips to ``len(res.sources) == 1``.
     """
     # Session 1: write through process A.
     mem_a = build_default_memory(project="restart", db_path=db_path)

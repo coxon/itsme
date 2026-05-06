@@ -190,6 +190,8 @@ lands in v0.0.4 — see ROADMAP T4.x.)
 | `ITSME_CTX_THRESHOLD` | `0.70` | Fraction of context that triggers proactive salvage |
 | `ITSME_CTX_MAX` | `200000` | Assumed context window (override per model) |
 | `ITSME_STATE_DIR` | `~/.itsme/state` | Per-session debounce state files |
+| `ITSME_MEMPALACE_BACKEND` | `auto` | `auto` (try stdio, fall back to inmemory + warn), `stdio` (hard-fail if missing), or `inmemory` (RAM-only, drawers don't survive MCP restarts) |
+| `ITSME_MEMPALACE_COMMAND` | `python3 -m mempalace.mcp_server` | Argv for the MemPalace stdio subprocess (only when backend ≠ `inmemory`) |
 
 The hook process and the MCP server both read the same env vars, so
 they always end up writing to the same events ring.
