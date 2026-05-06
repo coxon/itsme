@@ -227,9 +227,116 @@ they always end up writing to the same events ring.
 
 ---
 
+## Real-world setup notes
+
+These are the gotchas we hit dogfooding v0.0.1 on macOS + a custom
+gateway. Not strictly part of the spec, but the difference between
+"works in CI" and "works on your laptop".
+
+### `claude --bare` skips hooks
+
+CC's `--bare` flag enables minimal mode. Per `claude --help`:
+
+> Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory,
+> background prefetches, keychain reads, and CLAUDE.md auto-discovery.
+
+If you launch CC via a wrapper that adds `--bare` (a common pattern in
+zshrc helper functions for swapping API keys / models), itsme's MCP
+tools still work but **`SessionEnd` / `PreCompact` / `UserPromptSubmit`
+/ `PostToolUse` hooks never fire**. You'll see `raw.captured | explicit`
+events from manual `remember` calls but no `hook:before-exit` events.
+
+**Fix:** drop `--bare` from the wrapper. The plugin-sync cost it
+guards against is one-time on first install (`uv sync`); steady-state
+overhead is negligible.
+
+### Custom gateway: use `ANTHROPIC_AUTH_TOKEN`, not `ANTHROPIC_API_KEY`
+
+When pointing CC at a non-Anthropic gateway (`ANTHROPIC_BASE_URL=...`),
+`ANTHROPIC_API_KEY` is **not** the right variable — CC will treat the
+session as logged-out and prompt `/login`. Use `ANTHROPIC_AUTH_TOKEN`
+instead; it's sent as the bearer token to your gateway and CC accepts
+it as a valid auth method without keychain interference.
+
+```bash
+export ANTHROPIC_AUTH_TOKEN="sk-..."          # ← not ANTHROPIC_API_KEY
+export ANTHROPIC_BASE_URL="https://your-gateway.example.com"
+export ANTHROPIC_MODEL="your/model-id"
+claude
+```
+
+This is independent of itsme but bites first-time users hard enough
+that we mention it here.
+
+### Persistent storage: pointing the stdio adapter at MemPalace
+
+itsme's default `ITSME_MEMPALACE_BACKEND=auto` tries to spawn
+`python3 -m mempalace.mcp_server` as a subprocess for persistent
+storage. Two failure modes are common:
+
+1. **`uv run` finds no mempalace.** The MCP server boots inside
+   itsme's `.venv` (managed by `uv`). That venv won't have
+   mempalace installed unless you put it there explicitly. The
+   subprocess fails with `ModuleNotFoundError: No module named
+   'mempalace'`, the adapter logs a warning, and itsme falls back to
+   the in-memory adapter — which means **drawers vanish when the MCP
+   server exits**.
+
+2. **`mempalace` is shell alias only.** A `~/.zshrc` line like
+   `alias mempalace="python3 -m mempalace"` works in your shell but
+   subprocess spawns don't see aliases.
+
+**Fix:** point itsme at the system Python (or whatever interpreter has
+mempalace installed):
+
+```bash
+export ITSME_MEMPALACE_COMMAND="/usr/bin/python3 -m mempalace.mcp_server"
+export MEMPALACE_PALACE_PATH="$HOME/Documents/memory"  # mempalace's data dir
+```
+
+Verify via:
+
+```python
+from itsme.core.adapters.mempalace_stdio import StdioMemPalaceAdapter
+a = StdioMemPalaceAdapter.from_env()
+print(a.search("anything", limit=3))
+a.close()
+```
+
+If that prints hits (or even a clean empty list) without raising
+`MemPalaceConnectError`, the adapter chain is wired correctly.
+
+### Verifying end-to-end with sqlite
+
+The events ring is your source of truth. After a `/exit` (which fires
+SessionEnd) followed by any new session, run:
+
+```bash
+sqlite3 ~/.itsme/events.db \
+  "SELECT ts, type, source FROM events ORDER BY id DESC LIMIT 10;"
+```
+
+A healthy chain looks like:
+
+```
+… | memory.stored   | adapter:mempalace
+… | memory.routed   | worker:router
+… | raw.captured    | hook:before-exit   ← hook fired
+```
+
+If you see only `raw.captured | explicit` rows and no `hook:` sources,
+hooks aren't firing — re-check the `--bare` and "custom wrapper"
+sections above.
+
+If you see `hook:before-exit` but `adapter:mempalace` rows are absent,
+the router is running but the stdio adapter isn't connecting — re-read
+the "Persistent storage" section.
+
+---
+
 ## v0.0.1 acceptance criteria
 
 - [x] CC: plugin loads; `remember` / `ask` / `status` show up as MCP tools
 - [x] CC: SessionEnd / PreCompact / context-pressure hooks emit `raw.captured`
-- [ ] CC: end-to-end smoke (T1.20 — chat → exit → drawer in MP → ask retrieves)
+- [x] CC: end-to-end smoke (T1.20 — chat → exit → drawer in MP → ask retrieves)
 - [ ] Codex: equivalent flow (T1.18 + T1.21)

@@ -164,6 +164,7 @@ Detailed task list: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — dual-engine design, EventBus, Aleph pipeline
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestone breakdown
 - [`docs/INSTALL.md`](docs/INSTALL.md) — per-IDE install matrix
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — symptom-driven debugging
 - [`docs/ICONS.md`](docs/ICONS.md) — icon assets per phase
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — branching, commits, review flow
 - [`skills/itsme/SKILL.md`](skills/itsme/SKILL.md) — the script the agent reads
