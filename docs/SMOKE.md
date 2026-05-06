@@ -24,15 +24,31 @@ duplicate that finding.
 
 ## Install the plugin
 
+Pick one of two paths.
+
+**Marketplace** (matches what end users will do):
+
+```text
+/plugin marketplace add coxon/itsme
+/plugin install itsme@itsme
+```
+
+**Developer symlink** (matches what maintainers do while iterating):
+
 ```bash
 # from a checkout of github.com/coxon/itsme
 ln -snf "$PWD" ~/.claude/plugins/itsme
-uv sync                                  # installs the package + deps
+uv sync                                  # primes the venv
 ```
 
+Both routes need [`uv`](https://docs.astral.sh/uv/) on `$PATH` — the
+plugin spawns its MCP server via `uv run --project
+${CLAUDE_PLUGIN_ROOT} python -m itsme.mcp.server` so deps resolve from
+the plugin's own `pyproject.toml`.
+
 Restart Claude Code. The MCP server is auto-spawned by the plugin
-manifest; you should see `itsme` in `/mcp` listing within ~2s of CC
-boot.
+manifest; you should see `itsme` in `/mcp` listing within ~2-10s of
+CC boot (longer on first launch — uv has to sync deps once).
 
 ---
 
@@ -109,10 +125,14 @@ Don't fail the release on F2; flip the expectation when T1.13.5 lands.
 ### A1 fails — itsme MCP not loading
 
 1. `cat ~/.claude/plugins/itsme/.claude-plugin/plugin.json` — must
-   have `mcpServers.itsme.command = "python"`.
-2. `python -m itsme.mcp.server` from the project root — should hang
-   waiting for stdin (that's correct; Ctrl-C to exit).
-3. Check CC's MCP log (varies by CC version).
+   have `mcpServers.itsme.command = "uv"` and args including
+   `--project ${CLAUDE_PLUGIN_ROOT}`.
+2. `uv --version` — must be on `$PATH`. Install via
+   `curl -LsSf https://astral.sh/uv/install.sh | sh` if missing.
+3. From the plugin dir: `uv run --project . python -m itsme.mcp.server`
+   — should hang waiting for stdin (that's correct; Ctrl-C to exit).
+   First run takes 5-10s for the venv sync.
+4. Check CC's MCP log (varies by CC version).
 
 ### B/C/D fail but A passes — events ring not being written
 

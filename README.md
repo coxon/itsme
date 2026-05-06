@@ -34,29 +34,45 @@ wiki, Obsidian vault) — but the agent only sees three MCP verbs.
 
 ### Prerequisites
 
-- Python 3.12+ on `$PATH`
-- `pip install itsme` *(when published)* — for now: clone + editable install
+- Python 3.12+
+- [`uv`](https://docs.astral.sh/uv/) on `$PATH` — itsme uses `uv run`
+  to resolve its own deps from the plugin's `pyproject.toml`, so you
+  don't need a global `pip install itsme`. Install with:
+  `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+### Install (recommended — CC plugin marketplace)
+
+itsme ships its own `marketplace.json`, so the standard CC two-step
+works:
+
+```text
+/plugin marketplace add coxon/itsme
+/plugin install itsme@itsme
+```
+
+Restart CC. The MCP server boots on first activation (this triggers
+a one-time `uv sync` in the plugin's cache dir, ~5-10s); the three
+verbs and four hooks register automatically.
+
+`/plugin marketplace update itsme` pulls new versions; CC also
+auto-updates in the background at startup.
+
+### Install (developer mode — symlink a checkout)
+
+For hacking on itsme itself, point CC at your working tree directly:
 
 ```bash
 git clone https://github.com/coxon/itsme
 cd itsme
-uv sync                    # or: pip install -e .
-```
+uv sync                                  # primes the venv
 
-### Wire into Claude Code
-
-Symlink the repo into your CC plugins dir:
-
-```bash
 mkdir -p ~/.claude/plugins
-ln -s "$(pwd)" ~/.claude/plugins/itsme
+ln -snf "$PWD" ~/.claude/plugins/itsme
 ```
 
-CC will read `.claude-plugin/plugin.json` on next launch and start the
-MCP server (`python -m itsme.mcp.server`) over stdio. Three tools
-appear in the model's tool list, and the four CC hooks
-(`SessionEnd`, `PreCompact`, `UserPromptSubmit`, `PostToolUse`) get
-registered automatically.
+CC discovers the manifest at next launch. Edits to source flow
+through immediately — restart CC (or `/reload-plugins`) to pick
+them up.
 
 ### Verify
 
