@@ -61,7 +61,8 @@ picks them up without restart.
 
 ### Plugin manifest shape
 
-`.claude-plugin/plugin.json` (the version in this repo):
+`.claude-plugin/plugin.json` (excerpt — the version in this repo
+includes the full inline `"hooks"` block; one entry shown for shape):
 
 ```json
 {
@@ -77,6 +78,21 @@ picks them up without restart.
         "python", "-m", "itsme.mcp.server"
       ]
     }
+  },
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cc/before-exit.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+    // PreCompact, UserPromptSubmit, PostToolUse follow the same shape
+    // — see the file in this repo for the full block.
   }
 }
 ```
@@ -111,10 +127,22 @@ lives at marketplace root):
 > This costs one extra clone per install (CC fetches the marketplace
 > + the plugin separately) but is bulletproof.
 
-Hooks are wired separately at `hooks/hooks.json` (CC's plugin spec
-loads them from the same root). The four hook entries map to four
-shell shims in `hooks/cc/`, each of which dispatches into
+Hooks are wired inline in `.claude-plugin/plugin.json` under the
+`"hooks"` field (the four lifecycle / pressure events). Each entry
+maps to a shell shim in `hooks/cc/`, and each shim dispatches into
 `uv run --project ${CLAUDE_PLUGIN_ROOT} python -m itsme.hooks <name>`.
+
+> **Why inline rather than `hooks/hooks.json`?** CC's plugin spec
+> documents *both* forms, but the external-file form has a known
+> reliability bug — see [anthropics/claude-code#45296][cc-45296]
+> (framework deletes `hooks/hooks.json` from the working tree after
+> loading) and #54810 (some marketplace metadata paths fail to
+> register external hooks). Inlining sidesteps both. We keep the
+> shim scripts in `hooks/cc/` because that part of the spec is
+> stable and the path expansion of `${CLAUDE_PLUGIN_ROOT}` works
+> identically either way.
+
+[cc-45296]: https://github.com/anthropics/claude-code/issues/45296
 
 ### Hook contract
 
@@ -126,9 +154,10 @@ Each shim:
   as non-zero exits would render in the CC UI as red errors, which
   is the wrong UX for a passive-capture plugin.
 - Never blocks the IDE: timeouts (10-15s per hook) are configured in
-  `hooks/hooks.json`. Timeouts are higher than they need to be in
-  steady state to absorb the one-time cold-start `uv sync` if a
-  hook fires before the MCP server has been activated.
+  the inline `"hooks"` block in `plugin.json`. Timeouts are higher
+  than they need to be in steady state to absorb the one-time
+  cold-start `uv sync` if a hook fires before the MCP server has
+  been activated.
 
 ```bash
 # hooks/cc/before-exit.sh
