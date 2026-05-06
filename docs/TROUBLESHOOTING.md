@@ -146,9 +146,10 @@ relevant — never reaches for `mcp__itsme__ask`.
    The model picks the more specific-looking name.
 2. **Skill description not strong enough on routing priority.**
    Earlier itsme skill versions described *what* the tools do but not
-   *when to prefer them*. Recent skill updates (post-PR #17) add a
-   "Tool selection priority" section telling the model to try `ask`
-   before WebSearch when the query has any personal angle.
+   *when to prefer them*. The current `skills/itsme/SKILL.md` includes
+   a "Tool selection priority" section telling the model to try `ask`
+   before WebSearch when the query has any personal angle. If your
+   plugin install predates that change, update via the marketplace.
 
 **Fix.**
 
