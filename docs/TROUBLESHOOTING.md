@@ -170,7 +170,7 @@ relevant — never reaches for `mcp__itsme__ask`.
    ```
 
 2. Update itsme:
-   ```
+   ```bash
    /plugin marketplace update itsme && /plugin install itsme@itsme
    ```
 
