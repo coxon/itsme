@@ -18,13 +18,23 @@
 # installed, sync failure, etc.).
 set -u
 
+# CLAUDE_PLUGIN_ROOT is normally injected by CC before exec; if it
+# isn't (e.g. shim invoked manually), bail with the same envelope so
+# `set -u` doesn't surface as a red error in the UI.
+plugin_root="${CLAUDE_PLUGIN_ROOT:-}"
+if [[ -z "${plugin_root}" ]]; then
+    echo "itsme hook: CLAUDE_PLUGIN_ROOT unset; skipping capture." >&2
+    printf '{"continue": true, "suppressOutput": true}\n'
+    exit 0
+fi
+
 if ! command -v uv >/dev/null 2>&1; then
     echo "itsme hook: 'uv' not found on PATH; skipping capture." >&2
     printf '{"continue": true, "suppressOutput": true}\n'
     exit 0
 fi
 
-if ! uv run --project "${CLAUDE_PLUGIN_ROOT}" python -m itsme.hooks before-exit; then
+if ! uv run --project "${plugin_root}" python -m itsme.hooks before-exit; then
     echo "itsme hook: bootstrap failed; continuing without capture." >&2
     printf '{"continue": true, "suppressOutput": true}\n'
 fi
