@@ -105,15 +105,22 @@ to in-memory when mempalace isn't importable in the spawn environment**.
    `alias mempalace="python3 -m mempalace"` works in your interactive
    shell, but `subprocess.Popen` in itsme can't see aliases.
 
-**Fix.**
+**Fix.** Point itsme at the interpreter that *does* have mempalace
+installed. On macOS with the system Python that's `/usr/bin/python3`;
+on Linux, Homebrew, or pyenv it'll be elsewhere. Find it by running
+`command -v python3` (or `pyenv which python3`) in the shell where
+`python3 -c "import mempalace"` succeeds, then paste that absolute
+path into the env var. Don't try to embed `$(...)` substitutions in
+the env var itself — itsme `shlex.split`-s the value and exec's it
+directly, so command substitutions are not evaluated.
 
 ```bash
-# Use the system Python (or wherever mempalace IS installed):
+# Substitute the absolute path you got from `command -v python3`:
 export ITSME_MEMPALACE_COMMAND="/usr/bin/python3 -m mempalace.mcp_server"
 export MEMPALACE_PALACE_PATH="$HOME/Documents/memory"   # mempalace's data dir
 ```
 
-Verify the connection:
+Verify the connection (replace the python path the same way):
 
 ```bash
 ITSME_MEMPALACE_COMMAND='/usr/bin/python3 -m mempalace.mcp_server' \
