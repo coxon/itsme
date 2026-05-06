@@ -263,3 +263,56 @@ def test_remember_dedups_against_prior_hook_capture(memory: Memory) -> None:
     assert len(stored) == 1
     assert len(curated) == 1
     assert curated[0].payload["producer_kind"] == "explicit"
+
+
+# --------------------------------------------- backend selection (T1.13.5)
+# These tests cover ``_select_mempalace_backend`` — the env-driven dispatch
+# behind ``build_default_memory``. Exercising it directly avoids spinning up
+# real MemPalace subprocesses; the dispatch logic is the part we own here.
+
+
+def test_default_backend_is_auto(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No env var → auto path, which falls back to in-memory when
+    MemPalace isn't reachable. Must NOT silently land on
+    ``InMemoryMemPalaceAdapter`` *without* attempting stdio first —
+    that was the v0.0.1 trap (drawers never persisted).
+    """
+    from itsme.core import api as api_mod
+    from itsme.core.adapters import (
+        InMemoryMemPalaceAdapter,
+        StdioMemPalaceAdapter,
+    )
+    from itsme.core.adapters.mempalace_stdio import MemPalaceConnectError
+
+    monkeypatch.delenv("ITSME_MEMPALACE_BACKEND", raising=False)
+    # Force ``from_env`` to fail so we land in the warn-and-fallback branch.
+    monkeypatch.setattr(
+        StdioMemPalaceAdapter,
+        "from_env",
+        classmethod(
+            lambda cls: (_ for _ in ()).throw(  # noqa: B023
+                MemPalaceConnectError("forced for test")
+            )
+        ),
+    )
+    adapter = api_mod._select_mempalace_backend()  # noqa: SLF001
+    assert isinstance(adapter, InMemoryMemPalaceAdapter)
+
+
+def test_explicit_inmemory_backend_skips_stdio(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ITSME_MEMPALACE_BACKEND=inmemory`` must not import / spawn stdio."""
+    from itsme.core import api as api_mod
+    from itsme.core.adapters import InMemoryMemPalaceAdapter
+
+    monkeypatch.setenv("ITSME_MEMPALACE_BACKEND", "inmemory")
+    adapter = api_mod._select_mempalace_backend()  # noqa: SLF001
+    assert isinstance(adapter, InMemoryMemPalaceAdapter)
+
+
+def test_unknown_backend_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Typos must surface, not silently fall through."""
+    from itsme.core import api as api_mod
+
+    monkeypatch.setenv("ITSME_MEMPALACE_BACKEND", "wishful-thinking")
+    with pytest.raises(ValueError, match="unknown ITSME_MEMPALACE_BACKEND"):
+        api_mod._select_mempalace_backend()  # noqa: SLF001

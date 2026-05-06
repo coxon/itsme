@@ -422,27 +422,30 @@ def build_default_memory(
     Backend selection (when *adapter* is not passed) keys off
     ``$ITSME_MEMPALACE_BACKEND``:
 
-    * ``inmemory`` (**default**) → in-process
-      :class:`InMemoryMemPalaceAdapter`. **Drawers do NOT survive MCP
-      server restarts** — the events ring is persistent but the adapter
-      is RAM-only, so cross-session ``ask`` quietly returns nothing.
-      This is fine for tests / dev / first-cut usage; it is the v0.0.1
-      known gap.
-    * ``stdio`` → spawn a real MemPalace MCP server via
-      :class:`StdioMemPalaceAdapter`. Drawers persist. Requires
-      ``mempalace`` to be importable in the same Python (e.g.
-      ``uv pip install mempalace``).
-    * ``auto`` → try ``stdio``; on
+    * ``auto`` (**default**) → try ``stdio``; on
       :class:`~itsme.core.adapters.MemPalaceConnectError` fall back to
       ``inmemory`` with a ``stderr`` warning. Best for shipped builds
       that should "just work" when MemPalace is around without
       hard-failing when it isn't.
+    * ``stdio`` → spawn a real MemPalace MCP server via
+      :class:`StdioMemPalaceAdapter`. Drawers persist. Hard-fails at
+      startup if MemPalace isn't importable. Use this when persistence
+      is mandatory and a missing dep should surface loudly.
+    * ``inmemory`` → in-process
+      :class:`InMemoryMemPalaceAdapter`. **Drawers do NOT survive MCP
+      server restarts** — the events ring is persistent but the adapter
+      is RAM-only, so cross-session ``ask`` quietly returns nothing.
+      Useful for tests / dev / first-cut usage where the MemPalace
+      runtime isn't around.
 
-    The default stays at ``inmemory`` for one more release so the
-    persistent backend can accumulate dogfood hours before becoming the
-    silent default. Operators who want persistence today should set::
+    The default flipped from ``inmemory`` → ``auto`` once T1.13.5 had
+    accumulated dogfood hours: shipping ``inmemory`` as the silent
+    default meant first-cut users saw ``remember`` succeed but ``ask``
+    return zero hits (RAM-only adapter, drawers gone after the first
+    MCP server respawn). Operators who want the old behavior
+    explicitly can set::
 
-        export ITSME_MEMPALACE_BACKEND=auto   # or stdio for hard-fail
+        export ITSME_MEMPALACE_BACKEND=inmemory
 
     See also :class:`StdioMemPalaceAdapter.from_env` for the
     ``ITSME_MEMPALACE_*`` knobs that tune the subprocess (command,
@@ -463,33 +466,37 @@ def _select_mempalace_backend() -> MemPalaceAdapter:
     import os
     import sys
 
-    backend = os.environ.get("ITSME_MEMPALACE_BACKEND", "inmemory").strip().lower()
+    backend = os.environ.get("ITSME_MEMPALACE_BACKEND", "auto").strip().lower()
 
-    if backend == "inmemory" or backend == "":
-        return InMemoryMemPalaceAdapter()
+    if backend == "" or backend == "auto":
+        # Lazy import: don't pay the subprocess-adapter import cost for
+        # callers that explicitly opt out (``inmemory``).
+        from itsme.core.adapters.mempalace_stdio import (
+            MemPalaceConnectError,
+            StdioMemPalaceAdapter,
+        )
 
-    # Import lazily so ``inmemory`` (the default) doesn't pay the import
-    # cost of the subprocess adapter.
-    from itsme.core.adapters.mempalace_stdio import (
-        MemPalaceConnectError,
-        StdioMemPalaceAdapter,
-    )
-
-    if backend == "stdio":
-        return StdioMemPalaceAdapter.from_env()
-
-    if backend == "auto":
         try:
             return StdioMemPalaceAdapter.from_env()
         except MemPalaceConnectError as exc:
             print(
                 f"itsme: MemPalace stdio backend unavailable ({exc}); "
-                "falling back to in-memory (drawers will not persist across restarts)",
+                "falling back to in-memory adapter — drawers will not "
+                "persist across MCP server restarts. Install mempalace "
+                "(or set ITSME_MEMPALACE_BACKEND=inmemory to silence) to fix.",
                 file=sys.stderr,
             )
             return InMemoryMemPalaceAdapter()
 
+    if backend == "inmemory":
+        return InMemoryMemPalaceAdapter()
+
+    if backend == "stdio":
+        from itsme.core.adapters.mempalace_stdio import StdioMemPalaceAdapter
+
+        return StdioMemPalaceAdapter.from_env()
+
     # Unknown value → refuse silently would hide typos; loud is better.
     raise ValueError(
-        f"unknown ITSME_MEMPALACE_BACKEND={backend!r} " "(expected one of: inmemory, stdio, auto)"
+        f"unknown ITSME_MEMPALACE_BACKEND={backend!r} " "(expected one of: auto, inmemory, stdio)"
     )

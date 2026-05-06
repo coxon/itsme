@@ -133,6 +133,55 @@ def test_search_no_match_returns_empty() -> None:
     assert a.search("zeppelin") == []
 
 
+# ---------------------------------------------------- CJK tokenization
+
+# Regression: prior to the per-char CJK tokenizer, ``\w+`` swallowed an
+# entire Chinese sentence as one token, so a query of N characters
+# never overlapped a longer drawer run. This was the root cause behind
+# the v0.0.1 dogfood bug where ``ask("紫色独角兽")`` returned 0 hits
+# against a drawer storing ``"魔法口令：紫色独角兽在月光下吃蓝莓松饼"``.
+
+
+def test_search_cjk_substring_query_matches_longer_drawer() -> None:
+    """A 4-char CJK query must hit a drawer whose run is longer."""
+    a = InMemoryMemPalaceAdapter()
+    a.write(
+        content="魔法口令：紫色独角兽在月光下吃蓝莓松饼 2026-05-06",
+        wing="w",
+        room="r",
+    )
+    hits = a.search("紫色独角兽")
+    assert hits, "CJK substring query must hit longer CJK drawer"
+    assert "紫色独角兽" in hits[0].content
+
+
+def test_search_cjk_negative_case_still_misses() -> None:
+    """Non-overlapping CJK chars must not produce false positives."""
+    a = InMemoryMemPalaceAdapter()
+    a.write(content="紫色独角兽在月光下吃蓝莓松饼", wing="w", room="r")
+    # No shared characters — should miss.
+    assert a.search("苏门答腊老虎扑克玩法") == []
+
+
+def test_search_cjk_japanese_hiragana_katakana() -> None:
+    """Per-codepoint tokenization covers JP kana too."""
+    a = InMemoryMemPalaceAdapter()
+    a.write(content="ねこはかわいい", wing="w", room="r")  # hiragana
+    a.write(content="ロボットがすき", wing="w", room="r")  # mixed kana
+    assert a.search("ねこ"), "hiragana substring must hit"
+    assert a.search("ロボット"), "katakana substring must hit"
+
+
+def test_search_mixed_cjk_and_latin_query() -> None:
+    """A query mixing English + Chinese must still hit a mixed drawer."""
+    a = InMemoryMemPalaceAdapter()
+    a.write(content="itsme v0.0.1 在我机器上首次跑通", wing="w", room="r")
+    # Query using Latin token + Chinese run — both signals should
+    # contribute to the Jaccard score.
+    hits = a.search("itsme 跑通")
+    assert hits, "mixed-script query must overlap with mixed drawer"
+
+
 def test_close_is_idempotent() -> None:
     """close on the in-memory backend is a no-op and re-callable."""
     a = InMemoryMemPalaceAdapter()
