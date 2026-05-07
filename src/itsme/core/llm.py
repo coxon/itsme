@@ -194,7 +194,7 @@ class StubProvider:
 # ----------------------------------------------------------- factory
 
 
-def build_llm_provider(*, role: str = "intake") -> LLMProvider:
+def build_llm_provider(*, role: str = "intake") -> LLMProvider | None:
     """Auto-detect and construct the best available LLM provider.
 
     Args:
@@ -202,21 +202,22 @@ def build_llm_provider(*, role: str = "intake") -> LLMProvider:
             ``"promoter"`` (uses ``$ITSME_LLM_PROMOTER_MODEL``).
 
     Returns:
-        An :class:`AnthropicProvider` if ``$ANTHROPIC_API_KEY`` is set,
-        otherwise ``None`` — the caller decides whether to degrade or
-        raise.
-
-    Raises:
-        LLMError: ``anthropic`` SDK not installed but key is set.
+        An :class:`AnthropicProvider` if ``$ANTHROPIC_API_KEY`` is set
+        and the ``anthropic`` SDK is installed; ``None`` otherwise.
+        The caller decides whether to degrade or raise.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         _logger.info("itsme: no ANTHROPIC_API_KEY — LLM provider unavailable, will degrade")
-        return StubProvider(response="")
+        return None
 
     if role == "promoter":
         model = os.environ.get("ITSME_LLM_PROMOTER_MODEL", DEFAULT_PROMOTER_MODEL)
     else:
         model = os.environ.get("ITSME_LLM_MODEL", DEFAULT_INTAKE_MODEL)
 
-    return AnthropicProvider(model=model, api_key=api_key)
+    try:
+        return AnthropicProvider(model=model, api_key=api_key)
+    except LLMError as exc:
+        _logger.warning("itsme: LLM provider creation failed, degrading: %s", exc)
+        return None

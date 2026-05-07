@@ -33,7 +33,9 @@ from itsme.core.adapters.naming import wing as _wing
 from itsme.core.aleph.api import Aleph
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
+from itsme.core.llm import LLMProvider, StubProvider, build_llm_provider
 from itsme.core.search import SearchHit, dual_search
+from itsme.core.workers.intake import IntakeProcessor
 from itsme.core.workers.router import Router
 
 # All 4 documented modes are part of the type even though only
@@ -116,6 +118,8 @@ class Memory:
         project: Project name; becomes the default wing prefix.
         aleph: Optional :class:`Aleph` instance for dual-engine search
             (v0.0.2). When None, ``mode='auto'`` degrades to verbatim.
+        llm: Optional :class:`LLMProvider` for intake processing.
+            When None, intake degrades to raw MemPalace writes only.
     """
 
     def __init__(
@@ -125,12 +129,27 @@ class Memory:
         adapter: MemPalaceAdapter | None = None,
         project: str = "default",
         aleph: Aleph | None = None,
+        llm: LLMProvider | None = None,
     ) -> None:
         self._bus = bus
         self._adapter: MemPalaceAdapter = adapter or InMemoryMemPalaceAdapter()
         self._wing = _wing(project)
         self._router = Router(bus=self._bus, adapter=self._adapter, wing=self._wing)
         self._aleph = aleph
+        self._llm = llm
+
+        # Build intake processor for hook captures (replaces router
+        # consume_loop for non-explicit sources in v0.0.2).
+        if self._aleph is not None:
+            self._intake = IntakeProcessor(
+                bus=self._bus,
+                adapter=self._adapter,
+                aleph=self._aleph,
+                llm=self._llm or StubProvider(),
+                wing=self._wing,
+            )
+        else:
+            self._intake = None
 
     # ------------------------------------------------------------------ remember
     def remember(
@@ -437,16 +456,24 @@ class Memory:
         ignore_sources: Iterable[str] = ("explicit",),
         poll_interval: float = 0.5,
     ) -> Coroutine[Any, Any, None]:
-        """Return the router's async consume loop coroutine.
+        """Return the background consume loop coroutine.
+
+        v0.0.2: when an :class:`IntakeProcessor` is wired (Aleph +
+        optional LLM), returns the intake loop — which groups by
+        ``capture_batch_id``, runs LLM extraction, and dual-writes to
+        MemPalace + Aleph.
+
+        Fallback (no Aleph): returns the router's consume loop
+        (v0.0.1 behavior — rule-based routing, MemPalace only).
 
         Used by ``itsme.mcp.server`` to register a background worker
-        with the :class:`WorkerScheduler`. The loop reads
-        ``raw.captured`` events whose ``source`` does **not** start
-        with any prefix in *ignore_sources* (default: ``("explicit",)``
-        so the sync fast-path is not double-processed). Note this is
-        prefix matching via ``str.startswith``, not exact membership —
-        ``"explicit"`` will skip ``"explicit"`` *and* ``"explicit:cli"``.
+        with the :class:`WorkerScheduler`.
         """
+        if self._intake is not None:
+            return self._intake.consume_loop(
+                ignore_sources=ignore_sources,
+                poll_interval=poll_interval,
+            )
         return self._router.consume_loop(
             ignore_sources=ignore_sources,
             poll_interval=poll_interval,
@@ -505,6 +532,7 @@ def build_default_memory(
     capacity: int = 500,
     adapter: MemPalaceAdapter | None = None,
     aleph: Aleph | None = None,
+    llm: LLMProvider | None = None,
 ) -> Memory:
     """Construct a :class:`Memory` with sensible defaults.
 
@@ -516,44 +544,38 @@ def build_default_memory(
     at the default path (``~/.itsme/aleph.db`` or ``$ITSME_ALEPH_DB``).
     This enables ``ask(mode='auto')`` out of the box.
 
+    If *llm* is not passed, :func:`build_llm_provider` is called to
+    auto-detect from ``$ANTHROPIC_API_KEY``. If no key is set, intake
+    runs in degraded mode (raw writes only, no extraction).
+
     Backend selection (when *adapter* is not passed) keys off
     ``$ITSME_MEMPALACE_BACKEND``:
 
     * ``auto`` (**default**) → try ``stdio``; on
       :class:`~itsme.core.adapters.MemPalaceConnectError` fall back to
-      ``inmemory`` with a ``stderr`` warning. Best for shipped builds
-      that should "just work" when MemPalace is around without
-      hard-failing when it isn't.
+      ``inmemory`` with a ``stderr`` warning.
     * ``stdio`` → spawn a real MemPalace MCP server via
-      :class:`StdioMemPalaceAdapter`. Drawers persist. Hard-fails at
-      startup if MemPalace isn't importable. Use this when persistence
-      is mandatory and a missing dep should surface loudly.
+      :class:`StdioMemPalaceAdapter`.
     * ``inmemory`` → in-process
-      :class:`InMemoryMemPalaceAdapter`. **Drawers do NOT survive MCP
-      server restarts** — the events ring is persistent but the adapter
-      is RAM-only, so cross-session ``ask`` quietly returns nothing.
-      Useful for tests / dev / first-cut usage where the MemPalace
-      runtime isn't around.
-
-    The default flipped from ``inmemory`` → ``auto`` once T1.13.5 had
-    accumulated dogfood hours: shipping ``inmemory`` as the silent
-    default meant first-cut users saw ``remember`` succeed but ``ask``
-    return zero hits (RAM-only adapter, drawers gone after the first
-    MCP server respawn). Operators who want the old behavior
-    explicitly can set::
-
-        export ITSME_MEMPALACE_BACKEND=inmemory
-
-    See also :class:`StdioMemPalaceAdapter.from_env` for the
-    ``ITSME_MEMPALACE_*`` knobs that tune the subprocess (command,
-    handshake / call timeouts).
+      :class:`InMemoryMemPalaceAdapter`.
     """
+    import sys
+
     bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
     if adapter is None:
         adapter = _select_mempalace_backend()
     if aleph is None:
         aleph = Aleph()  # uses default path
-    return Memory(bus=bus, adapter=adapter, project=project, aleph=aleph)
+    if llm is None:
+        llm = build_llm_provider(role="intake")
+        if llm is None:
+            print(
+                "itsme: no ANTHROPIC_API_KEY set — intake runs in degraded mode "
+                "(raw MemPalace writes only, no Aleph extraction). "
+                "Set ANTHROPIC_API_KEY to enable LLM intake.",
+                file=sys.stderr,
+            )
+    return Memory(bus=bus, adapter=adapter, project=project, aleph=aleph, llm=llm)
 
 
 def _select_mempalace_backend() -> MemPalaceAdapter:

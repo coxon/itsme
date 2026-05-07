@@ -20,8 +20,11 @@ extraction. No data loss, just lower search precision.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib.resources import files as _files
 from typing import Any
@@ -256,6 +259,89 @@ class IntakeProcessor:
             drawer_id=drawer_id,
             extraction_id=extraction_id,
         )
+
+    # ---------------------------------------------------------- async loop
+
+    async def consume_loop(
+        self,
+        *,
+        ignore_sources: Iterable[str] = ("explicit",),
+        poll_interval: float = 0.5,
+        stop: asyncio.Event | None = None,
+    ) -> None:
+        """Poll the bus for unrouted ``raw.captured`` and process in batches.
+
+        Replaces the router's consume_loop for hook captures. Groups
+        events by ``capture_batch_id`` and processes each group as a
+        batch through the LLM intake pipeline.
+
+        Events from sources starting with any prefix in *ignore_sources*
+        are skipped (default: ``"explicit"`` — those go through
+        Memory.remember's sync fast-path).
+
+        Args:
+            ignore_sources: Producer prefixes to skip.
+            poll_interval: Seconds between polls when idle.
+            stop: Optional event; setting it exits the loop.
+        """
+        ignored = tuple(ignore_sources)
+        cursor: str | None = None
+
+        while True:
+            if stop is not None and stop.is_set():
+                return
+
+            new_events = self._bus.since(
+                cursor_id=cursor,
+                types=[EventType.RAW_CAPTURED],
+                limit=100,
+            )
+
+            # Group by capture_batch_id for batch processing
+            batches: dict[str, list[EventEnvelope]] = defaultdict(list)
+            unbatched: list[EventEnvelope] = []
+
+            for env in new_events:
+                cursor = env.id
+                if any(env.source.startswith(prefix) for prefix in ignored):
+                    continue
+                if self._already_stored(env.id):
+                    continue
+
+                batch_id = env.payload.get("capture_batch_id")
+                if isinstance(batch_id, str) and batch_id:
+                    batches[batch_id].append(env)
+                else:
+                    unbatched.append(env)
+
+            # Process each batch
+            for batch_events in batches.values():
+                try:
+                    self.process_batch(batch_events)
+                except Exception as exc:
+                    _logger.error("itsme intake: batch processing failed: %s", exc)
+
+            # Process unbatched events individually
+            for env in unbatched:
+                try:
+                    self.process_batch([env])
+                except Exception as exc:
+                    _logger.error("itsme intake: single event processing failed: %s", exc)
+
+            try:
+                if stop is None:
+                    await asyncio.sleep(poll_interval)
+                else:
+                    await asyncio.wait_for(stop.wait(), timeout=poll_interval)
+            except TimeoutError:
+                continue
+
+    def _already_stored(self, raw_event_id: str) -> bool:
+        """Has a ``memory.stored`` event been emitted for *raw_event_id*?"""
+        for env in self._bus.tail(n=500, types=[EventType.MEMORY_STORED]):
+            if env.payload.get("raw_event_id") == raw_event_id:
+                return True
+        return False
 
 
 # --------------------------------------------------------------------- parsing

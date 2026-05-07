@@ -116,11 +116,11 @@ class TestAnthropicProvider:
 
 
 class TestBuildLLMProvider:
-    def test_no_api_key_returns_stub(self) -> None:
+    def test_no_api_key_returns_none(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("ANTHROPIC_API_KEY", None)
             provider = build_llm_provider()
-            assert isinstance(provider, StubProvider)
+            assert provider is None
 
     def test_with_api_key_returns_anthropic(self) -> None:
         mock_anthropic = MagicMock()
