@@ -195,6 +195,18 @@ class DeepSeekProvider:
         choices = data.get("choices", [])
         if not choices:
             return ""
+
+        finish_reason = choices[0].get("finish_reason", "")
+        if finish_reason == "length":
+            usage = data.get("usage", {})
+            _logger.warning(
+                "LLM response truncated (finish_reason=length). "
+                "completion_tokens=%s, max_tokens=%s. "
+                "Increase max_tokens to avoid data loss.",
+                usage.get("completion_tokens", "?"),
+                max_tokens or self._max_tokens,
+            )
+
         return choices[0].get("message", {}).get("content", "")
 
     def __repr__(self) -> str:  # pragma: no cover

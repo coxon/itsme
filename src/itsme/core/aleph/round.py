@@ -25,6 +25,12 @@ from itsme.core.llm import LLMProvider, LLMUnavailableError
 
 _logger = logging.getLogger(__name__)
 
+#: Max output tokens for round LLM calls. Round operations produce JSON
+#: arrays with multiple create/update entries; the default 2048 is too
+#: small and causes truncation (finish_reason="length") → unparseable
+#: JSON → silent data loss.
+ROUND_MAX_TOKENS: int = 8192
+
 # ------------------------------------------------------------------ prompt
 
 _ROUND_PROMPT: str | None = None
@@ -184,6 +190,7 @@ class AlephRound:
         raw = self._llm.complete(
             system=_load_round_prompt(),
             messages=[{"role": "user", "content": user_message}],
+            max_tokens=ROUND_MAX_TOKENS,
         )
         return _parse_round_response(raw)
 
