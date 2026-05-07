@@ -542,9 +542,9 @@ def _stitch_answer(hits: list[MemPalaceHit]) -> str:
 def _stitch_auto_answer(hits: list[SearchHit]) -> str:
     """Concatenate dual-engine search results with kind labels.
 
-    Aleph hits show as ``[extraction 0.85]`` and MemPalace hits as
-    ``[verbatim 0.72]`` so the caller can distinguish precision
-    vs recall sources at a glance.
+    Wiki hits show as ``[wiki 0.85]`` and MemPalace hits as
+    ``[verbatim 0.72]`` so the caller can distinguish consolidated
+    knowledge vs raw sources at a glance.
     """
     if not hits:
         return ""

@@ -36,6 +36,34 @@ from itsme.core.aleph.wiki import Aleph, PageHit
 _logger = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------------ helpers
+
+
+def _page_hit_to_search_hit(hit: PageHit) -> SearchHit:
+    """Convert an Aleph :class:`PageHit` to a unified :class:`SearchHit`."""
+    slug = hit.meta.path.stem
+    content_parts = [hit.meta.summary]
+    if hit.snippet and hit.snippet != hit.meta.summary:
+        content_parts.append(hit.snippet)
+    content = "\n".join(p for p in content_parts if p)
+    return SearchHit(
+        kind="wiki",
+        ref=f"wiki:{slug}",
+        content=content,
+        score=hit.score,
+        metadata={
+            "title": hit.meta.title,
+            "type": hit.meta.type,
+            "domain": hit.meta.domain,
+            "subcategory": hit.meta.subcategory,
+            "path": str(hit.meta.path),
+        },
+    )
+
+
+# ------------------------------------------------------------------ types
+
+
 @dataclass(frozen=True)
 class SearchHit:
     """Unified search result from either engine.
@@ -106,27 +134,7 @@ def dual_search(
 
     # Wiki hits first (consolidated knowledge)
     for hit in wiki_hits:
-        slug = hit.meta.path.stem
-        content_parts = [hit.meta.summary]
-        if hit.snippet and hit.snippet != hit.meta.summary:
-            content_parts.append(hit.snippet)
-        content = "\n".join(p for p in content_parts if p)
-
-        results.append(
-            SearchHit(
-                kind="wiki",
-                ref=f"wiki:{slug}",
-                content=content,
-                score=hit.score,
-                metadata={
-                    "title": hit.meta.title,
-                    "type": hit.meta.type,
-                    "domain": hit.meta.domain,
-                    "subcategory": hit.meta.subcategory,
-                    "path": str(hit.meta.path),
-                },
-            )
-        )
+        results.append(_page_hit_to_search_hit(hit))
 
     # MemPalace gap-fills (high recall)
     seen_drawer_ids: set[str] = set()
@@ -176,25 +184,5 @@ def wiki_search(
 
     results: list[SearchHit] = []
     for hit in hits:
-        slug = hit.meta.path.stem
-        content_parts = [hit.meta.summary]
-        if hit.snippet and hit.snippet != hit.meta.summary:
-            content_parts.append(hit.snippet)
-        content = "\n".join(p for p in content_parts if p)
-
-        results.append(
-            SearchHit(
-                kind="wiki",
-                ref=f"wiki:{slug}",
-                content=content,
-                score=hit.score,
-                metadata={
-                    "title": hit.meta.title,
-                    "type": hit.meta.type,
-                    "domain": hit.meta.domain,
-                    "subcategory": hit.meta.subcategory,
-                    "path": str(hit.meta.path),
-                },
-            )
-        )
+        results.append(_page_hit_to_search_hit(hit))
     return results[:limit]

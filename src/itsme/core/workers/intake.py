@@ -117,9 +117,8 @@ class IntakeProcessor:
         """Process a batch of per-turn raw.captured events.
 
         All turns are written to MemPalace regardless of LLM verdict.
-        KEEP turns additionally get Aleph extraction entries.
-        After all writes, KEEP turns are fed to AlephRound for wiki
-        consolidation (if Aleph is configured).
+        KEEP turns are fed to AlephRound for wiki consolidation
+        (if Aleph is configured).
 
         Args:
             events: List of ``raw.captured`` events from the same
@@ -135,7 +134,7 @@ class IntakeProcessor:
         # Step 1: Extract structured data via LLM (or degrade)
         extractions = self._extract(events)
 
-        # Step 2: Write all turns to MemPalace + Aleph, emit triaged
+        # Step 2: Write all turns to MemPalace, emit triaged
         results: list[IntakeResult] = []
         for event, extraction in zip(events, extractions, strict=False):
             result = self._write_and_emit(event, extraction)
