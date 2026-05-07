@@ -1,6 +1,6 @@
 # itsme — Installation Matrix
 
-> Status: **v0.0.1a** alpha. CC fully wired, Codex pending T1.18.
+> Status: **v0.0.3** · CC fully wired, Codex pending T1.18.
 
 ---
 
@@ -67,7 +67,7 @@ includes the full inline `"hooks"` block; one entry shown for shape):
 ```json
 {
   "name": "itsme",
-  "version": "0.0.1a0",
+  "version": "0.0.3",
   "description": "Long-term memory plugin for agent IDEs — remember / ask / status",
   "mcpServers": {
     "itsme": {
@@ -75,7 +75,12 @@ includes the full inline `"hooks"` block; one entry shown for shape):
       "args": [
         "run", "--project", "${CLAUDE_PLUGIN_ROOT}",
         "python", "-m", "itsme.mcp.server"
-      ]
+      ],
+      "env": {
+        "DEEPSEEK_API_KEY": "${DEEPSEEK_API_KEY}",
+        "ITSME_MEMPALACE_COMMAND": "${ITSME_MEMPALACE_COMMAND}",
+        "MEMPALACE_PALACE_PATH": "${MEMPALACE_PALACE_PATH}"
+      }
     }
   },
   "hooks": {
@@ -107,7 +112,7 @@ lives at marketplace root):
     {
       "name": "itsme",
       "source": "./",
-      "version": "0.0.1a0"
+      "version": "0.0.3"
     }
   ]
 }
@@ -220,6 +225,10 @@ lands in v0.0.4 — see ROADMAP T4.x.)
 | `ITSME_STATE_DIR` | `~/.itsme/state` | Per-session debounce state files |
 | `ITSME_MEMPALACE_BACKEND` | `auto` | `auto` (try stdio, fall back to inmemory + warn), `stdio` (hard-fail if missing), or `inmemory` (RAM-only, drawers don't survive MCP restarts) |
 | `ITSME_MEMPALACE_COMMAND` | `python3 -m mempalace.mcp_server` | Argv for the MemPalace stdio subprocess (only when backend ≠ `inmemory`) |
+| `MEMPALACE_PALACE_PATH` | `~/Documents/memory` | MemPalace data directory (passed through to mempalace subprocess) |
+| `DEEPSEEK_API_KEY` | _(unset)_ | API key for DeepSeek LLM (intake + AlephRound). Without this, intake degrades to raw-only mode |
+| `ITSME_LLM_MODEL` | `deepseek-chat` | LLM model name for DeepSeek API |
+| `ITSME_ALEPH_ROOT` | `~/Documents/Aleph` | Obsidian vault root for wiki pages. `$ITSME_ALEPH_VAULT` as legacy fallback |
 
 The hook process and the MCP server both read the same env vars, so
 they always end up writing to the same events ring.
@@ -268,6 +277,55 @@ This is independent of itsme but bites first-time users hard enough
 that we mention it here.
 
 ### Persistent storage: pointing the stdio adapter at MemPalace
+
+**Important:** The MCP server process does **not** inherit your
+shell's environment variables (`.zshrc`, `.bashrc`, etc.). CC launches
+it directly from the plugin cache, so `DEEPSEEK_API_KEY`,
+`ITSME_MEMPALACE_COMMAND`, `MEMPALACE_PALACE_PATH`, etc. are invisible
+to the MCP process unless you configure them via one of these methods:
+
+#### Method 1: Edit `plugin.json` env block (recommended)
+
+The repo's `.claude-plugin/plugin.json` includes `"env"` placeholders
+using `${VAR}` syntax. CC resolves these from the CC process's own
+environment. If your shell exports these vars before launching `claude`,
+they propagate automatically.
+
+If CC doesn't resolve `${VAR}` placeholders in your version, edit the
+**cache copy** directly with literal values:
+
+```bash
+# Find the cache copy:
+ls ~/.claude/plugins/cache/itsme/itsme/*/.claude-plugin/plugin.json
+
+# Edit the env block with your actual values:
+{
+  "env": {
+    "DEEPSEEK_API_KEY": "sk-your-actual-key",
+    "ITSME_MEMPALACE_COMMAND": "/usr/bin/python3 -m mempalace.mcp_server",
+    "MEMPALACE_PALACE_PATH": "/Users/you/Documents/memory"
+  }
+}
+```
+
+> **Note:** The cache copy gets overwritten on `plugin install`. After
+> upgrading itsme, re-apply your env block.
+
+#### Method 2: System-level env vars
+
+On macOS, `launchctl setenv` makes vars visible to all GUI-spawned
+processes (including CC). Run **without** `sudo` — the user session
+domain is what CC inherits from:
+
+```bash
+launchctl setenv DEEPSEEK_API_KEY "sk-your-key"
+launchctl setenv ITSME_MEMPALACE_COMMAND "/usr/bin/python3 -m mempalace.mcp_server"
+launchctl setenv MEMPALACE_PALACE_PATH "$HOME/Documents/memory"
+```
+
+Restart Claude Code after setting these. No logout/login needed.
+
+### Persistent storage: MemPalace adapter
 
 itsme's default `ITSME_MEMPALACE_BACKEND=auto` tries to spawn
 `python3 -m mempalace.mcp_server` as a subprocess for persistent

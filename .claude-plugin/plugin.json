@@ -18,7 +18,14 @@
         "python",
         "-m",
         "itsme.mcp.server"
-      ]
+      ],
+      "env": {
+        "DEEPSEEK_API_KEY": "${DEEPSEEK_API_KEY}",
+        "ITSME_LLM_MODEL": "${ITSME_LLM_MODEL}",
+        "ITSME_MEMPALACE_COMMAND": "${ITSME_MEMPALACE_COMMAND}",
+        "MEMPALACE_PALACE_PATH": "${MEMPALACE_PALACE_PATH}",
+        "ITSME_ALEPH_ROOT": "${ITSME_ALEPH_ROOT}"
+      }
     }
   },
   "hooks": {
