@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from itsme.core.llm import (
-    AnthropicProvider,
+    DeepSeekProvider,
     LLMError,
     LLMUnavailableError,
     StubProvider,
@@ -44,72 +45,102 @@ class TestStubProvider:
         assert isinstance(stub, LLMProvider)
 
 
-# ---------------------------------------------------------- AnthropicProvider
+# ---------------------------------------------------------- DeepSeekProvider
 
 
-class TestAnthropicProvider:
+class TestDeepSeekProvider:
     def test_missing_api_key_raises(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            # Ensure ANTHROPIC_API_KEY is absent
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            with pytest.raises(LLMError, match="ANTHROPIC_API_KEY"):
-                AnthropicProvider(api_key="")
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            with pytest.raises(LLMError, match="DEEPSEEK_API_KEY"):
+                DeepSeekProvider(api_key="")
 
-    def test_missing_sdk_raises(self) -> None:
-        with patch.dict("sys.modules", {"anthropic": None}):
-            with pytest.raises(LLMError, match="anthropic"):
-                AnthropicProvider(api_key="sk-test-fake")
+    def test_complete_calls_api(self) -> None:
+        """Verify the provider sends correct request to the API."""
+        import httpx
 
-    def test_complete_calls_messages_api(self) -> None:
-        """Verify the provider wires through to anthropic.Anthropic.messages.create."""
-        # Build a fake anthropic module
-        mock_anthropic = MagicMock()
-        fake_text_block = MagicMock()
-        fake_text_block.text = "extracted: Postgres entity"
-        mock_response = MagicMock()
-        mock_response.content = [fake_text_block]
-        mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-        # Patch the import
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            provider = AnthropicProvider(api_key="sk-test", model="test-model")
+        # Build a fake response
+        fake_response = httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"role": "assistant", "content": "extracted: Postgres entity"}}
+                ]
+            },
+        )
+
+        provider = DeepSeekProvider(api_key="sk-test", model="test-model")
+        with patch("httpx.post", return_value=fake_response) as mock_post:
             result = provider.complete(
                 system="Extract entities.",
                 messages=[{"role": "user", "content": "I chose Postgres."}],
             )
+
         assert result == "extracted: Postgres entity"
-        call_kwargs = mock_anthropic.Anthropic.return_value.messages.create.call_args
-        assert call_kwargs.kwargs["model"] == "test-model"
-        assert call_kwargs.kwargs["system"] == "Extract entities."
+        call_kwargs = mock_post.call_args
+        body = call_kwargs.kwargs["json"]
+        assert body["model"] == "test-model"
+        # System message is prepended to messages
+        assert body["messages"][0] == {"role": "system", "content": "Extract entities."}
+        assert body["messages"][1] == {"role": "user", "content": "I chose Postgres."}
 
     def test_auth_error_raises_llm_error(self) -> None:
-        mock_anthropic = MagicMock()
-        mock_anthropic.AuthenticationError = type("AuthenticationError", (Exception,), {})
-        mock_anthropic.BadRequestError = type("BadRequestError", (Exception,), {})
-        mock_anthropic.RateLimitError = type("RateLimitError", (Exception,), {})
-        mock_anthropic.APIConnectionError = type("APIConnectionError", (Exception,), {})
-        mock_anthropic.APIStatusError = type("APIStatusError", (Exception,), {})
-        mock_anthropic.Anthropic.return_value.messages.create.side_effect = (
-            mock_anthropic.AuthenticationError("bad key")
-        )
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            provider = AnthropicProvider(api_key="sk-bad", model="m")
+        import httpx
+
+        fake_response = httpx.Response(401, text="Unauthorized")
+        provider = DeepSeekProvider(api_key="sk-bad", model="m")
+        with patch("httpx.post", return_value=fake_response):
             with pytest.raises(LLMError, match="auth"):
                 provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
 
     def test_rate_limit_raises_unavailable(self) -> None:
-        mock_anthropic = MagicMock()
-        mock_anthropic.AuthenticationError = type("AuthenticationError", (Exception,), {})
-        mock_anthropic.BadRequestError = type("BadRequestError", (Exception,), {})
-        mock_anthropic.RateLimitError = type("RateLimitError", (Exception,), {})
-        mock_anthropic.APIConnectionError = type("APIConnectionError", (Exception,), {})
-        mock_anthropic.APIStatusError = type("APIStatusError", (Exception,), {})
-        mock_anthropic.Anthropic.return_value.messages.create.side_effect = (
-            mock_anthropic.RateLimitError("too many")
-        )
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            provider = AnthropicProvider(api_key="sk-ok", model="m")
-            with pytest.raises(LLMUnavailableError, match="unavailable"):
+        import httpx
+
+        fake_response = httpx.Response(429, text="Too Many Requests")
+        provider = DeepSeekProvider(api_key="sk-ok", model="m")
+        with patch("httpx.post", return_value=fake_response):
+            with pytest.raises(LLMUnavailableError, match="rate limited"):
                 provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
+
+    def test_server_error_raises_unavailable(self) -> None:
+        import httpx
+
+        fake_response = httpx.Response(500, text="Internal Server Error")
+        provider = DeepSeekProvider(api_key="sk-ok", model="m")
+        with patch("httpx.post", return_value=fake_response):
+            with pytest.raises(LLMUnavailableError, match="server error"):
+                provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
+
+    def test_connection_error_raises_unavailable(self) -> None:
+        import httpx
+
+        provider = DeepSeekProvider(api_key="sk-ok", model="m")
+        with patch("httpx.post", side_effect=httpx.ConnectError("refused")):
+            with pytest.raises(LLMUnavailableError, match="connection"):
+                provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
+
+    def test_timeout_raises_unavailable(self) -> None:
+        import httpx
+
+        provider = DeepSeekProvider(api_key="sk-ok", model="m")
+        with patch("httpx.post", side_effect=httpx.ReadTimeout("timed out")):
+            with pytest.raises(LLMUnavailableError, match="timed out"):
+                provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
+
+    def test_empty_choices_returns_empty(self) -> None:
+        import httpx
+
+        fake_response = httpx.Response(200, json={"choices": []})
+        provider = DeepSeekProvider(api_key="sk-ok", model="m")
+        with patch("httpx.post", return_value=fake_response):
+            result = provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
+            assert result == ""
+
+    def test_custom_base_url(self) -> None:
+        provider = DeepSeekProvider(
+            api_key="sk-test", model="m", base_url="https://custom.api.com/v1"
+        )
+        assert provider._base_url == "https://custom.api.com/v1"  # noqa: SLF001
 
 
 # ------------------------------------------------------------- build factory
@@ -118,28 +149,20 @@ class TestAnthropicProvider:
 class TestBuildLLMProvider:
     def test_no_api_key_returns_none(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("ANTHROPIC_API_KEY", None)
+            os.environ.pop("DEEPSEEK_API_KEY", None)
             provider = build_llm_provider()
             assert provider is None
 
-    def test_with_api_key_returns_anthropic(self) -> None:
-        mock_anthropic = MagicMock()
-        with (
-            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}),
-            patch.dict("sys.modules", {"anthropic": mock_anthropic}),
-        ):
+    def test_with_api_key_returns_deepseek(self) -> None:
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test"}):
             provider = build_llm_provider()
-            assert isinstance(provider, AnthropicProvider)
+            assert isinstance(provider, DeepSeekProvider)
 
     def test_custom_model_env(self) -> None:
-        mock_anthropic = MagicMock()
-        with (
-            patch.dict(
-                os.environ,
-                {"ANTHROPIC_API_KEY": "sk-test", "ITSME_LLM_MODEL": "my-custom-model"},
-            ),
-            patch.dict("sys.modules", {"anthropic": mock_anthropic}),
+        with patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "sk-test", "ITSME_LLM_MODEL": "deepseek-reasoner"},
         ):
             provider = build_llm_provider()
-            assert isinstance(provider, AnthropicProvider)
-            assert provider._model == "my-custom-model"  # noqa: SLF001 — test internals
+            assert isinstance(provider, DeepSeekProvider)
+            assert provider._model == "deepseek-reasoner"  # noqa: SLF001 — test internals

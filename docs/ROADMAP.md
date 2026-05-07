@@ -25,7 +25,7 @@
 - ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（`core/adapters/mempalace.py`）+ **stdio MCP-client backend 已落地**（`core/adapters/mempalace_stdio.py`，T1.13.5，v0.0.1 GA），由 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 - ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
-- ✅ LLM 模型：统一用 **Sonnet 4.6**（`$ITSME_LLM_MODEL` 可覆盖）；v0.0.3+ 按需拆分 intake/promoter 模型
+- ✅ LLM 模型：统一用 **DeepSeek**（`deepseek-chat`，`$ITSME_LLM_MODEL` 可覆盖）；API key 通过 `$DEEPSEEK_API_KEY` 配置
 - ✅ Aleph v0.0.2 形态：**per-turn extraction index**（sqlite + FTS5），不含 wiki consolidation / vault 写入 / merge / crosslink。完整 Aleph pipeline 推迟到 v0.0.3
 - ✅ ask 搜索策略：**双引擎并行**（Aleph structured + MemPalace raw）→ 合并去重返回。结构化层是**搜索增强器，不是替代器**——LLM 提取遗漏时 MemPalace raw 兜底，永远不漏
 - ✅ Intake 运行位置：**router 异步 consume loop**（不阻塞 hook 进程）；explicit `remember()` 不走 intake，保持同步 fast-path
@@ -113,7 +113,7 @@
 
 #### LLM 基础设施
 
-- [x] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `AnthropicProvider` 实现。统一模型配置（`$ITSME_LLM_MODEL` 默认 Sonnet 4.6）。最小接口：`complete(system, messages) → str`。依赖 `anthropic` SDK（加入 `pyproject.toml` optional deps）。
+- [x] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `DeepSeekProvider` 实现（OpenAI-compatible API）。统一模型配置（`$ITSME_LLM_MODEL` 默认 `deepseek-chat`，`$DEEPSEEK_API_KEY`）。最小接口：`complete(system, messages) → str`。
 
 #### Aleph Extraction Index（轻量 — 不含 wiki / vault）
 

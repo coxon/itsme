@@ -4,16 +4,15 @@ Minimal interface for v0.0.2: ``complete(system, messages) → str``.
 
 Provider selection:
 
-* **AnthropicProvider** — production default. Requires ``anthropic``
-  SDK and ``$ANTHROPIC_API_KEY``.
+* **DeepSeekProvider** — production default. Uses the DeepSeek
+  OpenAI-compatible API. Requires ``$DEEPSEEK_API_KEY``.
 * **StubProvider** — returns a canned response. For tests and for the
   graceful-degradation path when no API key is configured.
 
 Model configuration:
 
-* ``$ITSME_LLM_MODEL`` — single model for all LLM calls (default
-  Sonnet 4.6). v0.0.2 uses one model for everything; role-specific
-  model selection is deferred to v0.0.3+ if cost warrants it.
+* ``$ITSME_LLM_MODEL`` — model name (default ``deepseek-chat``).
+* ``$DEEPSEEK_API_KEY`` — API key for DeepSeek.
 
 Usage::
 
@@ -34,8 +33,11 @@ _logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------- defaults
 
-#: Single default model for all LLM calls in v0.0.2.
-DEFAULT_MODEL: str = "claude-sonnet-4-6-20260514"
+#: Default model for all LLM calls.
+DEFAULT_MODEL: str = "deepseek-chat"
+
+#: Default DeepSeek API base URL.
+DEFAULT_BASE_URL: str = "https://api.deepseek.com"
 
 #: Default max output tokens for a single LLM call.
 DEFAULT_MAX_TOKENS: int = 2048
@@ -79,16 +81,18 @@ class LLMUnavailableError(LLMError):
     """Transient failure — caller should degrade gracefully."""
 
 
-# ----------------------------------------------------------- Anthropic provider
+# ----------------------------------------------------------- DeepSeek provider
 
 
-class AnthropicProvider:
-    """Production LLM backend via the Anthropic Messages API.
+class DeepSeekProvider:
+    """Production LLM backend via the DeepSeek OpenAI-compatible API.
 
     Args:
         model: Model id override. Defaults to ``$ITSME_LLM_MODEL``
             or :data:`DEFAULT_MODEL`.
-        api_key: API key override. Defaults to ``$ANTHROPIC_API_KEY``.
+        api_key: API key override. Defaults to ``$DEEPSEEK_API_KEY``.
+        base_url: API base URL. Defaults to ``$ITSME_LLM_BASE_URL``
+            or :data:`DEFAULT_BASE_URL`.
         max_tokens: Default max output tokens (can be overridden per call).
     """
 
@@ -97,27 +101,23 @@ class AnthropicProvider:
         *,
         model: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
     ) -> None:
         self._model = model or os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
+        self._base_url = (
+            base_url
+            or os.environ.get("ITSME_LLM_BASE_URL", DEFAULT_BASE_URL)
+        ).rstrip("/")
         self._max_tokens = max_tokens
 
-        resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or ""
+        resolved_key = api_key or os.environ.get("DEEPSEEK_API_KEY") or ""
         if not resolved_key:
             raise LLMError(
-                "ANTHROPIC_API_KEY is required for AnthropicProvider. "
+                "DEEPSEEK_API_KEY is required for DeepSeekProvider. "
                 "Set it in the environment or pass api_key= explicitly."
             )
-
-        try:
-            import anthropic  # type: ignore[import-untyped]
-        except ImportError as exc:
-            raise LLMError(
-                "The 'anthropic' package is required for AnthropicProvider. "
-                "Install it with: pip install anthropic"
-            ) from exc
-
-        self._client = anthropic.Anthropic(api_key=resolved_key)
+        self._api_key = resolved_key
 
     def complete(
         self,
@@ -126,36 +126,61 @@ class AnthropicProvider:
         messages: list[dict[str, str]],
         max_tokens: int | None = None,
     ) -> str:
-        """Call the Anthropic Messages API.
+        """Call the DeepSeek chat completions API.
 
         Raises:
             LLMError: Authentication or request-shape errors.
             LLMUnavailableError: Network / rate-limit / server errors.
         """
-        import anthropic  # type: ignore[import-untyped]
+        import httpx
+
+        api_messages: list[dict[str, str]] = []
+        if system:
+            api_messages.append({"role": "system", "content": system})
+        api_messages.extend(messages)
 
         try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=max_tokens or self._max_tokens,
-                system=system,
-                messages=messages,
+            response = httpx.post(
+                f"{self._base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self._model,
+                    "messages": api_messages,
+                    "max_tokens": max_tokens or self._max_tokens,
+                },
+                timeout=60.0,
             )
-        except anthropic.AuthenticationError as exc:
-            raise LLMError(f"Anthropic auth failed: {exc}") from exc
-        except anthropic.BadRequestError as exc:
-            raise LLMError(f"Anthropic bad request: {exc}") from exc
-        except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
-            raise LLMUnavailableError(f"Anthropic unavailable: {exc}") from exc
+        except httpx.ConnectError as exc:
+            raise LLMUnavailableError(f"DeepSeek connection failed: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMUnavailableError(f"DeepSeek request timed out: {exc}") from exc
 
-        # Messages API returns content blocks; take the first text block.
-        for block in response.content:
-            if hasattr(block, "text"):
-                return block.text
-        return ""
+        if response.status_code == 401:
+            raise LLMError(f"DeepSeek auth failed (401): {response.text[:200]}")
+        if response.status_code == 400:
+            raise LLMError(f"DeepSeek bad request (400): {response.text[:200]}")
+        if response.status_code == 429:
+            raise LLMUnavailableError(f"DeepSeek rate limited (429): {response.text[:200]}")
+        if response.status_code >= 500:
+            raise LLMUnavailableError(
+                f"DeepSeek server error ({response.status_code}): {response.text[:200]}"
+            )
+        if response.status_code != 200:
+            raise LLMError(
+                f"DeepSeek unexpected status ({response.status_code}): {response.text[:200]}"
+            )
+
+        data = response.json()
+        choices = data.get("choices", [])
+        if not choices:
+            return ""
+        return choices[0].get("message", {}).get("content", "")
 
     def __repr__(self) -> str:  # pragma: no cover
-        return f"<AnthropicProvider model={self._model!r}>"
+        return f"<DeepSeekProvider model={self._model!r} base_url={self._base_url!r}>"
 
 
 # ----------------------------------------------------------- Stub provider
@@ -194,19 +219,19 @@ def build_llm_provider() -> LLMProvider | None:
     """Auto-detect and construct the best available LLM provider.
 
     Returns:
-        An :class:`AnthropicProvider` if ``$ANTHROPIC_API_KEY`` is set
-        and the ``anthropic`` SDK is installed; ``None`` otherwise.
-        The caller decides whether to degrade or raise.
+        A :class:`DeepSeekProvider` if ``$DEEPSEEK_API_KEY`` is set;
+        ``None`` otherwise. The caller decides whether to degrade or
+        raise.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
-        _logger.info("itsme: no ANTHROPIC_API_KEY — LLM provider unavailable, will degrade")
+        _logger.info("itsme: no DEEPSEEK_API_KEY — LLM provider unavailable, will degrade")
         return None
 
     model = os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
 
     try:
-        return AnthropicProvider(model=model, api_key=api_key)
+        return DeepSeekProvider(model=model, api_key=api_key)
     except LLMError as exc:
         _logger.warning("itsme: LLM provider creation failed, degrading: %s", exc)
         return None

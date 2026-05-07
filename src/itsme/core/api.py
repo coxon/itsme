@@ -545,7 +545,7 @@ def build_default_memory(
     This enables ``ask(mode='auto')`` out of the box.
 
     If *llm* is not passed, :func:`build_llm_provider` is called to
-    auto-detect from ``$ANTHROPIC_API_KEY``. If no key is set, intake
+    auto-detect from ``$DEEPSEEK_API_KEY``. If no key is set, intake
     runs in degraded mode (raw writes only, no extraction).
 
     Backend selection (when *adapter* is not passed) keys off
@@ -570,9 +570,9 @@ def build_default_memory(
         llm = build_llm_provider()
         if llm is None:
             print(
-                "itsme: no ANTHROPIC_API_KEY set — intake runs in degraded mode "
+                "itsme: no DEEPSEEK_API_KEY set — intake runs in degraded mode "
                 "(raw MemPalace writes only, no Aleph extraction). "
-                "Set ANTHROPIC_API_KEY to enable LLM intake.",
+                "Set DEEPSEEK_API_KEY to enable LLM intake.",
                 file=sys.stderr,
             )
     return Memory(bus=bus, adapter=adapter, project=project, aleph=aleph, llm=llm)
