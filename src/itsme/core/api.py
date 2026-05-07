@@ -641,7 +641,12 @@ def build_default_memory(
     if vault is None:
         vault = _discover_vault()
     return Memory(
-        bus=bus, adapter=adapter, project=project, aleph=aleph, llm=llm, vault=vault,
+        bus=bus,
+        adapter=adapter,
+        project=project,
+        aleph=aleph,
+        llm=llm,
+        vault=vault,
     )
 
 

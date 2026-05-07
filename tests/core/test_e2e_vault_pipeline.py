@@ -136,48 +136,55 @@ class TestVaultPipeline:
         """Kept turns flow through AlephRound and create vault wiki pages."""
         llm = _make_intake_and_round_llm(
             # Intake response: 2 kept turns
-            intake_response=json.dumps([
-                {
-                    "verdict": "keep",
-                    "summary": "User chose Postgres for the user service",
-                    "entities": [{"name": "Postgres", "type": "database"}],
-                    "claims": ["Postgres chosen for user service"],
-                },
-                {
-                    "verdict": "keep",
-                    "summary": "Redis selected for caching layer",
-                    "entities": [{"name": "Redis", "type": "database"}],
-                    "claims": ["Redis for caching"],
-                },
-            ]),
+            intake_response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "User chose Postgres for the user service",
+                        "entities": [{"name": "Postgres", "type": "database"}],
+                        "claims": ["Postgres chosen for user service"],
+                    },
+                    {
+                        "verdict": "keep",
+                        "summary": "Redis selected for caching layer",
+                        "entities": [{"name": "Redis", "type": "database"}],
+                        "claims": ["Redis for caching"],
+                    },
+                ]
+            ),
             # Round response: create 2 wiki pages
-            round_response=json.dumps([
-                {
-                    "action": "create",
-                    "slug": "postgres",
-                    "domain": "technology",
-                    "subcategory": "engineering",
-                    "type": "concept",
-                    "title": "Postgres",
-                    "summary": "关系型数据库，选用于用户服务",
-                    "body_section": "因并发写入需求选择",
-                },
-                {
-                    "action": "create",
-                    "slug": "redis",
-                    "domain": "technology",
-                    "subcategory": "engineering",
-                    "type": "concept",
-                    "title": "Redis",
-                    "summary": "缓存层",
-                },
-            ]),
+            round_response=json.dumps(
+                [
+                    {
+                        "action": "create",
+                        "slug": "postgres",
+                        "domain": "technology",
+                        "subcategory": "engineering",
+                        "type": "concept",
+                        "title": "Postgres",
+                        "summary": "关系型数据库，选用于用户服务",
+                        "body_section": "因并发写入需求选择",
+                    },
+                    {
+                        "action": "create",
+                        "slug": "redis",
+                        "domain": "technology",
+                        "subcategory": "engineering",
+                        "type": "concept",
+                        "title": "Redis",
+                        "summary": "缓存层",
+                    },
+                ]
+            ),
         )
 
-        events = _emit_hook_turns(bus, [
-            ("user", "I decided to use Postgres for the user service"),
-            ("user", "And Redis for the caching layer"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                ("user", "I decided to use Postgres for the user service"),
+                ("user", "And Redis for the caching layer"),
+            ],
+        )
 
         processor = IntakeProcessor(
             bus=bus,
@@ -235,24 +242,35 @@ class TestVaultPipeline:
         )
 
         llm = _make_intake_and_round_llm(
-            intake_response=json.dumps([{
-                "verdict": "keep",
-                "summary": "Postgres now used for analytics too",
-                "entities": [{"name": "Postgres", "type": "database"}],
-                "claims": ["Postgres handles analytics workload"],
-            }]),
-            round_response=json.dumps([{
-                "action": "update",
-                "slug": "postgres",
-                "add_related": ["[[analytics-pipeline]]"],
-                "append_body": "> 新增用于分析管道\n",
-                "history_entry": "- 2026-05-07 更新，新增分析用途",
-            }]),
+            intake_response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "Postgres now used for analytics too",
+                        "entities": [{"name": "Postgres", "type": "database"}],
+                        "claims": ["Postgres handles analytics workload"],
+                    }
+                ]
+            ),
+            round_response=json.dumps(
+                [
+                    {
+                        "action": "update",
+                        "slug": "postgres",
+                        "add_related": ["[[analytics-pipeline]]"],
+                        "append_body": "> 新增用于分析管道\n",
+                        "history_entry": "- 2026-05-07 更新，新增分析用途",
+                    }
+                ]
+            ),
         )
 
-        events = _emit_hook_turns(bus, [
-            ("user", "We're also using Postgres for the analytics pipeline"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                ("user", "We're also using Postgres for the analytics pipeline"),
+            ],
+        )
 
         processor = IntakeProcessor(
             bus=bus,
@@ -279,9 +297,11 @@ class TestVaultPipeline:
     ) -> None:
         """When all turns are skipped, AlephRound is not called."""
         llm = StubProvider(
-            response=json.dumps([
-                {"verdict": "skip", "skip_reason": "greeting"},
-            ]),
+            response=json.dumps(
+                [
+                    {"verdict": "skip", "skip_reason": "greeting"},
+                ]
+            ),
         )
 
         events = _emit_hook_turns(bus, [("user", "Hello!")])
@@ -309,21 +329,29 @@ class TestVaultPipeline:
     ) -> None:
         """wiki.promoted event is emitted when vault pages are created."""
         llm = _make_intake_and_round_llm(
-            intake_response=json.dumps([{
-                "verdict": "keep",
-                "summary": "New tech decision",
-                "entities": [],
-                "claims": [],
-            }]),
-            round_response=json.dumps([{
-                "action": "create",
-                "slug": "new-decision",
-                "domain": "technology",
-                "subcategory": "ai",
-                "type": "decision",
-                "title": "New Decision",
-                "summary": "A new technical decision",
-            }]),
+            intake_response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "New tech decision",
+                        "entities": [],
+                        "claims": [],
+                    }
+                ]
+            ),
+            round_response=json.dumps(
+                [
+                    {
+                        "action": "create",
+                        "slug": "new-decision",
+                        "domain": "technology",
+                        "subcategory": "ai",
+                        "type": "decision",
+                        "title": "New Decision",
+                        "summary": "A new technical decision",
+                    }
+                ]
+            ),
         )
 
         events = _emit_hook_turns(bus, [("user", "We decided on a new approach")])
@@ -377,7 +405,11 @@ class TestAskWiki:
         )
 
         memory = Memory(
-            bus=bus, adapter=adapter, project="test", aleph=aleph, vault=vault,
+            bus=bus,
+            adapter=adapter,
+            project="test",
+            aleph=aleph,
+            vault=vault,
         )
         result = memory.ask("Postgres", mode="wiki")
 
@@ -435,7 +467,11 @@ class TestAskAutoWithVault:
         )
 
         memory = Memory(
-            bus=bus, adapter=adapter, project="test", aleph=aleph, vault=vault,
+            bus=bus,
+            adapter=adapter,
+            project="test",
+            aleph=aleph,
+            vault=vault,
         )
         result = memory.ask("Redis caching", mode="auto")
 
@@ -474,7 +510,11 @@ class TestAskAutoWithVault:
         )
 
         memory = Memory(
-            bus=bus, adapter=adapter, project="test", aleph=aleph, vault=vault,
+            bus=bus,
+            adapter=adapter,
+            project="test",
+            aleph=aleph,
+            vault=vault,
         )
         result = memory.ask("Kubernetes", mode="auto")
 
@@ -497,12 +537,16 @@ class TestVaultDegradation:
     ) -> None:
         """IntakeProcessor without vault = v0.0.2 behavior, no crash."""
         llm = StubProvider(
-            response=json.dumps([{
-                "verdict": "keep",
-                "summary": "Test",
-                "entities": [],
-                "claims": [],
-            }]),
+            response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "Test",
+                        "entities": [],
+                        "claims": [],
+                    }
+                ]
+            ),
         )
 
         events = _emit_hook_turns(bus, [("user", "test content")])
@@ -551,7 +595,9 @@ class TestVaultDegradation:
 
 class TestVaultDiscovery:
     def test_discover_vault_from_env(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """$ITSME_ALEPH_VAULT points to a vault."""
         from itsme.core.api import _discover_vault
@@ -568,7 +614,9 @@ class TestVaultDiscovery:
         assert discovered.root == vault_root.resolve()
 
     def test_discover_vault_missing_returns_none(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """No vault at any candidate path → None."""
         from itsme.core.api import _discover_vault
