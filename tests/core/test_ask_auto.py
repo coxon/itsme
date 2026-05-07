@@ -159,8 +159,8 @@ class TestAskAuto:
         )
 
         result = memory.ask("label", mode="auto")
-        if result.answer:
-            assert "extraction" in result.answer or "verbatim" in result.answer
+        assert result.answer, "auto answer should be non-empty when Aleph has hits"
+        assert "extraction" in result.answer or "verbatim" in result.answer
 
     def test_verbatim_still_works(self, memory: Memory, adapter: InMemoryMemPalaceAdapter) -> None:
         """Existing verbatim mode is unchanged."""

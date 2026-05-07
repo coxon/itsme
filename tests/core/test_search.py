@@ -115,8 +115,8 @@ class TestDualSearch:
         hits = dual_search("database", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         kinds = {h.kind for h in hits}
-        assert "extraction" in kinds or "verbatim" in kinds
-        assert len(hits) >= 1
+        assert "extraction" in kinds and "verbatim" in kinds
+        assert len(hits) >= 2
 
     def test_dedup_same_drawer_id(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Same turn matched by both engines — only one hit per drawer_id."""
@@ -153,9 +153,9 @@ class TestDualSearch:
 
         hits = dual_search("Redis caching", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
-        if len(hits) >= 2:
-            # First hit should be extraction (Aleph)
-            assert hits[0].kind == "extraction"
+        assert len(hits) >= 2
+        # First hit should be extraction (Aleph)
+        assert hits[0].kind == "extraction"
 
     def test_no_aleph_degrades_to_mempalace_only(self, adapter: InMemoryMemPalaceAdapter) -> None:
         """When aleph=None, behaves like verbatim search."""
@@ -269,9 +269,9 @@ class TestSearchHitStructure:
 
         hits = dual_search("testing", adapter=adapter, aleph=aleph, limit=5)
         mp_hits = [h for h in hits if h.kind == "verbatim"]
-        if mp_hits:
-            assert mp_hits[0].metadata is None
-            assert mp_hits[0].extraction_id == ""
+        assert len(mp_hits) >= 1, "should have at least one verbatim hit"
+        assert mp_hits[0].metadata is None
+        assert mp_hits[0].extraction_id == ""
 
     def test_ref_format(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Refs follow the expected format."""
