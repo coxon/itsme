@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,77 @@ def load_hook_input(stdin_text: str) -> dict[str, Any]:
 
 
 # -------------------------------------------------------- transcript IO
+
+
+@dataclass(frozen=True)
+class TranscriptTurn:
+    """A single turn extracted from a CC transcript JSONL row.
+
+    Attributes:
+        role: ``"user"`` or ``"assistant"`` (from the JSONL ``type`` field).
+        text: Plain text content (envelope-stripped, see T2.0a).
+    """
+
+    role: str
+    text: str
+
+
+def _extract_turn(entry: dict[str, Any]) -> TranscriptTurn | None:
+    """Extract a :class:`TranscriptTurn` from one JSONL row, or None."""
+    role = entry.get("type", "")
+    if role not in ("user", "assistant"):
+        return None
+    text = _extract_message_text(entry)
+    if not text or not text.strip():
+        return None
+    return TranscriptTurn(role=role, text=text)
+
+
+def _iter_transcript_turns(path: Path) -> list[TranscriptTurn]:
+    """Parse all turns from a CC transcript JSONL file.
+
+    Returns per-turn :class:`TranscriptTurn` objects in chronological
+    order. Empty/malformed rows are silently skipped.
+    """
+    if not path.exists():
+        return []
+    turns: list[TranscriptTurn] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        turn = _extract_turn(entry)
+        if turn is not None:
+            turns.append(turn)
+    return turns
+
+
+def read_transcript_tail_turns(path: Path, *, max_chars: int) -> list[TranscriptTurn]:
+    """Return the newest turns that fit within *max_chars* total.
+
+    Walks from the newest turn backward, accumulating until the char
+    budget is exhausted. Returns turns in **chronological** order.
+    Each turn's text has already been envelope-stripped (T2.0a).
+    """
+    if max_chars <= 0:
+        return []
+    turns = _iter_transcript_turns(path)
+    if not turns:
+        return []
+    collected: list[TranscriptTurn] = []
+    total = 0
+    for turn in reversed(turns):
+        total += len(turn.text) + 1
+        if total > max_chars and collected:
+            break
+        collected.append(turn)
+    return list(reversed(collected))
 
 
 def _extract_message_text(entry: dict[str, Any]) -> str:

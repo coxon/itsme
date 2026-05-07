@@ -98,8 +98,8 @@ def test_before_exit_writes_event(tmp_path: Path, isolated_db: Path) -> None:
     bus = EventBus(db_path=isolated_db)
     try:
         events = bus.tail(n=10, types=[EventType.RAW_CAPTURED])
-        assert len(events) == 1
-        assert events[0].source == "hook:before-exit"
+        assert len(events) == 2  # T2.0b: per-turn emission (hello + world)
+        assert all(e.source == "hook:before-exit" for e in events)
     finally:
         bus.close()
 

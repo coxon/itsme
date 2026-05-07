@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ulid import ULID
+
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventType
 from itsme.hooks import _common
@@ -266,25 +268,35 @@ def run_context_pressure(
         # without disarming so the next tick retries.
         return _common.ok_output()
 
-    bus.emit(
-        type=EventType.RAW_CAPTURED,
-        source="hook:context-pressure",
-        payload={
-            "content": snapshot,
-            "kind": None,
-            # T1.19: cross-producer dedup keys (see core/dedup.py).
-            "content_hash": content_hash(snapshot),
-            "producer_kind": producer_kind_from_source("hook:context-pressure"),
-            "pressure": round(pressure, 3),
-            "tokens_estimated": tokens,
-            "threshold": resolved_threshold,
-            "max_tokens": resolved_max,
-            "hook_event": payload_in.get("hook_event_name"),
-            "session_id": session_id_raw,
-            "transcript_ref": {"path": transcript_path_raw},
-            "cwd": payload_in.get("cwd"),
-        },
-    )
+    # T2.0b: per-turn emission (same pattern as lifecycle hooks).
+    turns = _common.read_transcript_tail_turns(transcript_path, max_chars=snapshot_chars)
+    if not turns:
+        return _common.ok_output()
+
+    batch_id = str(ULID())
+    producer = producer_kind_from_source("hook:context-pressure")
+
+    for turn in turns:
+        bus.emit(
+            type=EventType.RAW_CAPTURED,
+            source="hook:context-pressure",
+            payload={
+                "content": turn.text,
+                "kind": None,
+                "turn_role": turn.role,
+                "capture_batch_id": batch_id,
+                "content_hash": content_hash(turn.text),
+                "producer_kind": producer,
+                "pressure": round(pressure, 3),
+                "tokens_estimated": tokens,
+                "threshold": resolved_threshold,
+                "max_tokens": resolved_max,
+                "hook_event": payload_in.get("hook_event_name"),
+                "session_id": session_id_raw,
+                "transcript_ref": {"path": transcript_path_raw},
+                "cwd": payload_in.get("cwd"),
+            },
+        )
 
     state.last_triggered = pressure
     state.armed = False
