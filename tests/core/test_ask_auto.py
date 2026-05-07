@@ -49,7 +49,9 @@ class TestAskAuto:
         result = memory.ask("anything", mode="auto")
         assert result.queried_event_id
 
-    def test_auto_returns_aleph_hits(self, memory: Memory, adapter, aleph) -> None:
+    def test_auto_returns_aleph_hits(
+        self, memory: Memory, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+    ) -> None:
         """Aleph extraction hits show up in auto mode."""
         aleph.write_extraction(
             turn_id="d1",
@@ -65,7 +67,9 @@ class TestAskAuto:
         assert len(extraction_sources) >= 1
         assert "Postgres" in extraction_sources[0].content
 
-    def test_auto_returns_mempalace_hits(self, memory: Memory, adapter) -> None:
+    def test_auto_returns_mempalace_hits(
+        self, memory: Memory, adapter: InMemoryMemPalaceAdapter
+    ) -> None:
         """MemPalace raw hits show up as verbatim in auto mode."""
         adapter.write(
             content="Redis is used for session caching",
@@ -77,7 +81,9 @@ class TestAskAuto:
         mp_sources = [s for s in result.sources if s.kind == "verbatim"]
         assert len(mp_sources) >= 1
 
-    def test_auto_deduplicates_same_turn(self, memory: Memory, adapter, aleph) -> None:
+    def test_auto_deduplicates_same_turn(
+        self, memory: Memory, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+    ) -> None:
         """Same turn hit by both engines → only Aleph hit shown."""
         res = adapter.write(
             content="We will use DynamoDB for the event store",
@@ -100,14 +106,16 @@ class TestAskAuto:
         # Aleph hit is present
         assert len(aleph_refs) >= 1
 
-    def test_auto_emits_queried_event_with_mode(self, memory: Memory, bus) -> None:
+    def test_auto_emits_queried_event_with_mode(self, memory: Memory, bus: EventBus) -> None:
         """memory.queried event carries mode='auto'."""
         memory.ask("anything", mode="auto")
         events = bus.tail(n=5, types=[EventType.MEMORY_QUERIED])
         assert len(events) >= 1
         assert events[0].payload["mode"] == "auto"
 
-    def test_auto_event_has_hit_breakdown(self, memory: Memory, bus, aleph) -> None:
+    def test_auto_event_has_hit_breakdown(
+        self, memory: Memory, bus: EventBus, aleph: Aleph
+    ) -> None:
         """Event payload includes aleph_hits / mp_hits counts."""
         aleph.write_extraction(
             turn_id="d1",
@@ -124,7 +132,9 @@ class TestAskAuto:
         assert "aleph_hits" in payload
         assert "mp_hits" in payload
 
-    def test_auto_without_aleph_degrades(self, bus, adapter) -> None:
+    def test_auto_without_aleph_degrades(
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
+    ) -> None:
         """Memory without Aleph → auto mode still works (MP only)."""
         mem = Memory(bus=bus, adapter=adapter, project="test", aleph=None)
         adapter.write(
@@ -137,7 +147,7 @@ class TestAskAuto:
         # Still returns results (from MemPalace)
         assert result.queried_event_id
 
-    def test_auto_answer_includes_kind_labels(self, memory, aleph) -> None:
+    def test_auto_answer_includes_kind_labels(self, memory: Memory, aleph: Aleph) -> None:
         """Auto answer shows [extraction ...] or [verbatim ...] labels."""
         aleph.write_extraction(
             turn_id="d1",
@@ -152,7 +162,7 @@ class TestAskAuto:
         if result.answer:
             assert "extraction" in result.answer or "verbatim" in result.answer
 
-    def test_verbatim_still_works(self, memory: Memory, adapter) -> None:
+    def test_verbatim_still_works(self, memory: Memory, adapter: InMemoryMemPalaceAdapter) -> None:
         """Existing verbatim mode is unchanged."""
         adapter.write(
             content="Verbatim mode backwards compat",

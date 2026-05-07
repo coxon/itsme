@@ -102,7 +102,7 @@
 
 > **设计原则**：MemPalace 是"什么都记"的原料仓——搜索面是 raw 全文。Aleph extraction index 是 LLM 提取的结构化搜索增强层。`ask` 搜两路合并，**结构化层漏提取时 MemPalace raw 兜底，永远不丢**。
 
-> **成本**：Intake 用 Sonnet 4.6（统一模型，`$ITSME_LLM_MODEL` 可覆盖），v0.0.3+ 视成本按需拆分。
+> **成本**：Intake 用 DeepSeek（统一模型，`$ITSME_LLM_MODEL` 可覆盖），v0.0.3+ 视成本按需拆分。
 
 ### Tasks
 

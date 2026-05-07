@@ -65,7 +65,7 @@ def _write_aleph(
 
 
 class TestDualSearch:
-    def test_aleph_only_hit(self, adapter, aleph) -> None:
+    def test_aleph_only_hit(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Aleph has the answer but MemPalace doesn't match."""
         _write_aleph(
             aleph,
@@ -83,7 +83,7 @@ class TestDualSearch:
         assert len(aleph_hits) == 1
         assert "Postgres" in aleph_hits[0].content
 
-    def test_mempalace_only_hit(self, adapter, aleph) -> None:
+    def test_mempalace_only_hit(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """MemPalace has the answer but Aleph doesn't match."""
         _write_mp(adapter, "We decided to deploy on Monday morning")
         _write_aleph(
@@ -99,7 +99,9 @@ class TestDualSearch:
         assert len(mp_hits) >= 1
         assert "deploy" in mp_hits[0].content
 
-    def test_both_engines_hit_different_turns(self, adapter, aleph) -> None:
+    def test_both_engines_hit_different_turns(
+        self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+    ) -> None:
         """Both engines return different turns — no dedup needed."""
         _write_mp(adapter, "We discussed database options last week")
         _write_aleph(
@@ -116,7 +118,7 @@ class TestDualSearch:
         assert "extraction" in kinds or "verbatim" in kinds
         assert len(hits) >= 1
 
-    def test_dedup_same_drawer_id(self, adapter, aleph) -> None:
+    def test_dedup_same_drawer_id(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Same turn matched by both engines — only one hit per drawer_id."""
         drawer_id = _write_mp(adapter, "Use Postgres for the user service")
         _write_aleph(
@@ -136,7 +138,9 @@ class TestDualSearch:
         aleph_hits = [h for h in hits if h.kind == "extraction"]
         assert len(aleph_hits) >= 1
 
-    def test_aleph_ranked_before_mempalace(self, adapter, aleph) -> None:
+    def test_aleph_ranked_before_mempalace(
+        self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+    ) -> None:
         """Aleph hits appear before MemPalace gap-fills."""
         _write_mp(adapter, "Redis is used for caching in production")
         _write_aleph(
@@ -153,7 +157,7 @@ class TestDualSearch:
             # First hit should be extraction (Aleph)
             assert hits[0].kind == "extraction"
 
-    def test_no_aleph_degrades_to_mempalace_only(self, adapter) -> None:
+    def test_no_aleph_degrades_to_mempalace_only(self, adapter: InMemoryMemPalaceAdapter) -> None:
         """When aleph=None, behaves like verbatim search."""
         _write_mp(adapter, "Important decision about deployment")
 
@@ -169,13 +173,13 @@ class TestDualSearch:
 
 
 class TestEdgeCases:
-    def test_empty_query(self, adapter, aleph) -> None:
+    def test_empty_query(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         assert dual_search("", adapter=adapter, aleph=aleph, limit=5) == []
 
-    def test_whitespace_query(self, adapter, aleph) -> None:
+    def test_whitespace_query(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         assert dual_search("   ", adapter=adapter, aleph=aleph, limit=5) == []
 
-    def test_limit_respected(self, adapter, aleph) -> None:
+    def test_limit_respected(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Results never exceed limit."""
         for i in range(10):
             _write_mp(adapter, f"item {i} about testing")
@@ -184,14 +188,14 @@ class TestEdgeCases:
         hits = dual_search("test", adapter=adapter, aleph=aleph, wing="wing_test", limit=3)
         assert len(hits) <= 3
 
-    def test_no_results(self, adapter, aleph) -> None:
+    def test_no_results(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Query that matches nothing in either engine."""
         hits = dual_search(
             "xyzzy nonexistent term", adapter=adapter, aleph=aleph, wing="wing_test", limit=5
         )
         assert hits == []
 
-    def test_aleph_error_degrades_gracefully(self, adapter) -> None:
+    def test_aleph_error_degrades_gracefully(self, adapter: InMemoryMemPalaceAdapter) -> None:
         """If Aleph search throws, fall back to MemPalace-only."""
         _write_mp(adapter, "Important data about servers")
 
@@ -241,7 +245,7 @@ class TestScoreNormalization:
 
 
 class TestSearchHitStructure:
-    def test_aleph_hit_has_metadata(self, adapter, aleph) -> None:
+    def test_aleph_hit_has_metadata(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Aleph hits carry entities/claims in metadata."""
         _write_aleph(
             aleph,
@@ -259,7 +263,7 @@ class TestSearchHitStructure:
         assert "claims" in aleph_hits[0].metadata
         assert aleph_hits[0].extraction_id  # non-empty
 
-    def test_mp_hit_has_no_metadata(self, adapter, aleph) -> None:
+    def test_mp_hit_has_no_metadata(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """MemPalace hits don't carry structured metadata."""
         _write_mp(adapter, "Some raw content about testing")
 
@@ -269,7 +273,7 @@ class TestSearchHitStructure:
             assert mp_hits[0].metadata is None
             assert mp_hits[0].extraction_id == ""
 
-    def test_ref_format(self, adapter, aleph) -> None:
+    def test_ref_format(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Refs follow the expected format."""
         _write_mp(adapter, "Ref format test content")
         _write_aleph(aleph, "Ref format extraction", turn_id="d-ref", claims=["ref test"])

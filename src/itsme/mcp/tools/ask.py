@@ -27,7 +27,7 @@ def ask_handler(
     memory: Memory,
     *,
     question: str,
-    mode: str = "verbatim",
+    mode: str = "auto",
     limit: int = 5,
 ) -> dict[str, Any]:
     """Validate inputs and dispatch to :meth:`Memory.ask`.

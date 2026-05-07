@@ -48,7 +48,7 @@ def build_server(memory: Memory) -> FastMCP[Any]:
         """Persist a memory drawer. Returns the new event id + drawer id."""
         return remember_handler(memory, content=content, kind=kind)
 
-    def ask(question: str, mode: str = "verbatim", limit: int = 5) -> dict[str, Any]:
+    def ask(question: str, mode: str = "auto", limit: int = 5) -> dict[str, Any]:
         """Search memory. mode='auto' (dual-engine) or 'verbatim' (MemPalace only)."""
         return ask_handler(memory, question=question, mode=mode, limit=limit)
 
@@ -69,7 +69,7 @@ def build_server(memory: Memory) -> FastMCP[Any]:
     server.add_tool(
         ask,
         name="ask",
-        description="Query verbatim memory and return ranked passages.",
+        description="Query memory and return ranked passages.",
     )
     server.add_tool(
         status,
