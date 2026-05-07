@@ -29,7 +29,9 @@ SERVER_NAME = "itsme"
 SERVER_INSTRUCTIONS = (
     "Long-term memory plugin: 3 verbs. "
     "remember(content, kind?) writes verbatim. "
-    "ask(question, mode?) reads verbatim (v0.0.1). "
+    "ask(question, mode?) reads memory — mode='auto' (default) "
+    "uses dual-engine search (Aleph structured + MemPalace raw), "
+    "mode='verbatim' searches MemPalace only. "
     "status(scope?, format?) shows recent activity."
 )
 
@@ -47,7 +49,7 @@ def build_server(memory: Memory) -> FastMCP[Any]:
         return remember_handler(memory, content=content, kind=kind)
 
     def ask(question: str, mode: str = "verbatim", limit: int = 5) -> dict[str, Any]:
-        """Search verbatim memory. v0.0.1 only supports mode='verbatim'."""
+        """Search memory. mode='auto' (dual-engine) or 'verbatim' (MemPalace only)."""
         return ask_handler(memory, question=question, mode=mode, limit=limit)
 
     def status(

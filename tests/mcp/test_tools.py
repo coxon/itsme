@@ -71,7 +71,7 @@ def test_ask_handler_rejects_unknown_mode(memory: Memory) -> None:
         ask_handler(memory, question="q", mode="exfiltrate")
 
 
-@pytest.mark.parametrize("mode", ["auto", "wiki", "now"])
+@pytest.mark.parametrize("mode", ["wiki", "now"])
 def test_ask_handler_unsupported_mode_rejected_at_boundary(
     memory: Memory,
     mode: str,
@@ -81,6 +81,8 @@ def test_ask_handler_unsupported_mode_rejected_at_boundary(
     Tool boundary deliberately rejects upfront so callers don't see
     ``NotImplementedError`` leaking from core; the core itself still
     raises NIE for direct callers (verified in tests/core/test_api).
+    v0.0.2 supports 'verbatim' and 'auto'; 'wiki' / 'now' are still
+    rejected.
     """
     with pytest.raises(ValueError, match="not yet supported"):
         ask_handler(memory, question="q", mode=mode)

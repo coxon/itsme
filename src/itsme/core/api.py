@@ -30,8 +30,10 @@ from itsme.core.adapters import (
     MemPalaceHit,
 )
 from itsme.core.adapters.naming import wing as _wing
+from itsme.core.aleph.api import Aleph
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
+from itsme.core.search import SearchHit, dual_search
 from itsme.core.workers.router import Router
 
 # All 4 documented modes are part of the type even though only
@@ -60,7 +62,7 @@ class AskSource(BaseModel):
     """One row of provenance behind :class:`AskResult`."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    kind: Literal["verbatim", "wiki"]
+    kind: Literal["verbatim", "wiki", "extraction"]
     ref: str
     content: str
     score: float
@@ -112,6 +114,8 @@ class Memory:
             :class:`InMemoryMemPalaceAdapter` so tests and bare-bones
             development just work.
         project: Project name; becomes the default wing prefix.
+        aleph: Optional :class:`Aleph` instance for dual-engine search
+            (v0.0.2). When None, ``mode='auto'`` degrades to verbatim.
     """
 
     def __init__(
@@ -120,11 +124,13 @@ class Memory:
         bus: EventBus,
         adapter: MemPalaceAdapter | None = None,
         project: str = "default",
+        aleph: Aleph | None = None,
     ) -> None:
         self._bus = bus
         self._adapter: MemPalaceAdapter = adapter or InMemoryMemPalaceAdapter()
         self._wing = _wing(project)
         self._router = Router(bus=self._bus, adapter=self._adapter, wing=self._wing)
+        self._aleph = aleph
 
     # ------------------------------------------------------------------ remember
     def remember(
@@ -245,20 +251,22 @@ class Memory:
         limit: int = 5,
         scope_to_project: bool = True,
     ) -> AskResult:
-        """Query MemPalace verbatim and emit ``memory.queried``.
+        """Query memory and emit ``memory.queried``.
 
-        v0.0.1 only honors ``mode='verbatim'``. ``mode='auto'`` and
-        ``mode='wiki'`` route through Aleph (v0.0.2); ``mode='now'``
-        aggregates the events ring (v0.0.3+). Asking for those modes
-        today raises :class:`NotImplementedError` so the boundary is
-        explicit.
+        Supports two modes in v0.0.2:
+
+        * ``verbatim`` — MemPalace-only keyword search (v0.0.1 behavior).
+        * ``auto`` — dual-engine: Aleph extraction index (high precision)
+          + MemPalace raw (high recall), merged and deduplicated.
+
+        ``wiki`` and ``now`` modes are deferred to v0.0.3+.
 
         Args:
             question: Natural-language query.
-            mode: Read strategy — only ``"verbatim"`` is implemented.
+            mode: Read strategy — ``"verbatim"`` or ``"auto"``.
             limit: Max number of hits to return.
-            scope_to_project: When True, restrict the search to the
-                project's wing; when False, search across all wings.
+            scope_to_project: When True, restrict the MemPalace search
+                to the project's wing; when False, search across all wings.
 
         Returns:
             :class:`AskResult` with a stitched answer and provenance
@@ -266,26 +274,42 @@ class Memory:
 
         Raises:
             ValueError: *question* is empty or *limit* is non-positive.
-            NotImplementedError: a v0.0.1-unsupported *mode* was passed.
+            NotImplementedError: a mode not yet implemented was passed.
         """
         if not question.strip():
             raise ValueError("ask(question=...) must be non-empty")
         if limit <= 0:
             raise ValueError("limit must be positive")
-        if mode != "verbatim":
+        if mode not in ("verbatim", "auto"):
             raise NotImplementedError(
-                f"mode={mode!r} is not implemented in v0.0.1 — only 'verbatim' is supported"
+                f"mode={mode!r} is not implemented in v0.0.2 — "
+                "only 'verbatim' and 'auto' are supported"
             )
 
         wing_filter = self._wing if scope_to_project else None
-        hits: list[MemPalaceHit] = self._adapter.search(question, limit=limit, wing=wing_filter)
+
+        if mode == "auto":
+            return self._ask_auto(question, wing_filter=wing_filter, limit=limit)
+        return self._ask_verbatim(question, wing_filter=wing_filter, limit=limit)
+
+    def _ask_verbatim(
+        self,
+        question: str,
+        *,
+        wing_filter: str | None,
+        limit: int,
+    ) -> AskResult:
+        """MemPalace-only search (v0.0.1 behavior)."""
+        hits: list[MemPalaceHit] = self._adapter.search(
+            question, limit=limit, wing=wing_filter,
+        )
 
         evt = self._bus.emit(
             type=EventType.MEMORY_QUERIED,
             source="reader",
             payload={
                 "question": question,
-                "mode": mode,
+                "mode": "verbatim",
                 "hit_count": len(hits),
                 "wing": wing_filter,
             },
@@ -302,6 +326,57 @@ class Memory:
         ]
         return AskResult(
             answer=_stitch_answer(hits),
+            sources=sources,
+            queried_event_id=evt.id,
+            promoted=False,
+            promotion_event_id=None,
+        )
+
+    def _ask_auto(
+        self,
+        question: str,
+        *,
+        wing_filter: str | None,
+        limit: int,
+    ) -> AskResult:
+        """Dual-engine search: Aleph (structured) + MemPalace (raw).
+
+        When Aleph is not wired (None), gracefully degrades to
+        MemPalace-only — identical to verbatim behavior but with
+        mode='auto' in the event payload for observability.
+        """
+        hits = dual_search(
+            question,
+            adapter=self._adapter,
+            aleph=self._aleph,
+            wing=wing_filter,
+            limit=limit,
+        )
+
+        evt = self._bus.emit(
+            type=EventType.MEMORY_QUERIED,
+            source="reader",
+            payload={
+                "question": question,
+                "mode": "auto",
+                "hit_count": len(hits),
+                "aleph_hits": sum(1 for h in hits if h.kind == "extraction"),
+                "mp_hits": sum(1 for h in hits if h.kind == "verbatim"),
+                "wing": wing_filter,
+            },
+        )
+
+        sources = [
+            AskSource(
+                kind=h.kind,  # type: ignore[arg-type]
+                ref=h.ref,
+                content=h.content,
+                score=h.score,
+            )
+            for h in hits
+        ]
+        return AskResult(
+            answer=_stitch_auto_answer(hits),
             sources=sources,
             queried_event_id=evt.id,
             promoted=False,
@@ -378,9 +453,11 @@ class Memory:
         )
 
     def close(self) -> None:
-        """Close the bus and adapter. Safe to call multiple times."""
+        """Close the bus, adapter, and Aleph. Safe to call multiple times."""
         self._adapter.close()
         self._bus.close()
+        if self._aleph is not None:
+            self._aleph.close()
 
 
 # --------------------------------------------------------------------------
@@ -401,6 +478,21 @@ def _stitch_answer(hits: list[MemPalaceHit]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _stitch_auto_answer(hits: list[SearchHit]) -> str:
+    """Concatenate dual-engine search results with kind labels.
+
+    Aleph hits show as ``[extraction 0.85]`` and MemPalace hits as
+    ``[verbatim 0.72]`` so the caller can distinguish precision
+    vs recall sources at a glance.
+    """
+    if not hits:
+        return ""
+    parts: list[str] = []
+    for h in hits:
+        parts.append(f"[{h.kind} {h.score:.2f}] {h.content}")
+    return "\n\n---\n\n".join(parts)
+
+
 def default_db_path() -> Path:
     """Default events ring location — ``~/.itsme/events.db``."""
     return Path.home() / ".itsme" / "events.db"
@@ -412,12 +504,17 @@ def build_default_memory(
     db_path: Path | None = None,
     capacity: int = 500,
     adapter: MemPalaceAdapter | None = None,
+    aleph: Aleph | None = None,
 ) -> Memory:
     """Construct a :class:`Memory` with sensible defaults.
 
     Used by ``itsme.mcp.server`` to wire up a Memory instance from
     config without leaking pydantic / sqlite plumbing into the MCP
     layer.
+
+    If *aleph* is not passed, an :class:`Aleph` instance is created
+    at the default path (``~/.itsme/aleph.db`` or ``$ITSME_ALEPH_DB``).
+    This enables ``ask(mode='auto')`` out of the box.
 
     Backend selection (when *adapter* is not passed) keys off
     ``$ITSME_MEMPALACE_BACKEND``:
@@ -454,7 +551,9 @@ def build_default_memory(
     bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
     if adapter is None:
         adapter = _select_mempalace_backend()
-    return Memory(bus=bus, adapter=adapter, project=project)
+    if aleph is None:
+        aleph = Aleph()  # uses default path
+    return Memory(bus=bus, adapter=adapter, project=project, aleph=aleph)
 
 
 def _select_mempalace_backend() -> MemPalaceAdapter:

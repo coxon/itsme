@@ -1,12 +1,12 @@
-"""``ask(question, mode?)`` — query tool (T1.11).
+"""``ask(question, mode?)`` — query tool (T1.11 + T2.19).
 
 Tool-layer responsibility: argument validation + orchestration only.
 We do **not** call MemPalace MCP or Aleph internals here; everything
 goes through :class:`itsme.core.Memory` so the read path stays
 swappable.
 
-v0.0.1 honors only ``mode='verbatim'``; ``mode='auto'`` and
-``promote=true`` arrive in v0.0.2 / v0.0.3 (see ROADMAP).
+v0.0.1 honored only ``mode='verbatim'``; v0.0.2 adds ``mode='auto'``
+for dual-engine search (Aleph structured + MemPalace raw). See T2.19.
 """
 
 from __future__ import annotations
@@ -18,6 +18,9 @@ from itsme.core import Memory
 #: Hard upper bound on a single ``ask`` so a malicious or buggy caller
 #: can't ask MemPalace for thousands of hits and pin the bus.
 MAX_LIMIT = 100
+
+#: Modes accepted at the tool boundary in v0.0.2.
+_ACCEPTED_MODES = {"verbatim", "auto"}
 
 
 def ask_handler(
@@ -32,7 +35,8 @@ def ask_handler(
     Args:
         memory: Process-wide :class:`Memory` instance.
         question: Natural-language query. Must be non-empty.
-        mode: Read strategy. v0.0.1 only accepts ``"verbatim"``.
+        mode: Read strategy. v0.0.2 accepts ``"verbatim"`` and
+            ``"auto"`` (dual-engine search).
         limit: Max number of hits (1 ≤ limit ≤ :data:`MAX_LIMIT`).
 
     Returns:
@@ -41,20 +45,19 @@ def ask_handler(
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string")
 
-    # v0.0.1 only accepts "verbatim" at the tool boundary. The other
-    # modes (auto / wiki / now) are documented in core for forward
-    # compat but explicitly rejected here so callers see a clean
-    # ValueError instead of a NotImplementedError leaking from Memory.
     if not isinstance(mode, str):
         raise ValueError(f"mode must be a string; got {mode!r}")
-    if mode == "verbatim":
+    if mode in _ACCEPTED_MODES:
         pass
-    elif mode in {"auto", "wiki", "now"}:
+    elif mode in {"wiki", "now"}:
         raise ValueError(
-            f"mode={mode!r} is not yet supported in v0.0.1 — only 'verbatim' is available"
+            f"mode={mode!r} is not yet supported in v0.0.2 — "
+            "only 'verbatim' and 'auto' are available"
         )
     else:
-        raise ValueError(f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}")
+        raise ValueError(
+            f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}"
+        )
 
     # bool is a subclass of int in Python — reject it explicitly so
     # ``limit=True`` doesn't silently mean "1 hit".
@@ -65,7 +68,7 @@ def ask_handler(
 
     result = memory.ask(
         question=question,
-        mode=cast(Literal["verbatim"], mode),
+        mode=cast(Literal["verbatim", "auto"], mode),
         limit=limit,
     )
     return result.model_dump(mode="json")
