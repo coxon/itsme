@@ -148,7 +148,8 @@ class IntakeProcessor:
             results.append(result)
 
         # Step 3: Consolidate kept turns into Obsidian vault
-        round_result = self._run_vault_round(events, extractions)
+        # Only include turns that were kept AND successfully written
+        round_result = self._run_vault_round(events, results)
         if round_result is not None:
             self._emit_vault_events(round_result)
 
@@ -301,25 +302,31 @@ class IntakeProcessor:
     def _run_vault_round(
         self,
         events: list[EventEnvelope],
-        extractions: list[dict[str, Any]],
+        results: list[IntakeResult],
     ) -> RoundResult | None:
-        """Feed kept turns to AlephRound for Obsidian vault consolidation.
+        """Feed successfully-kept turns to AlephRound for vault consolidation.
+
+        Only includes turns that were kept by the LLM AND successfully
+        written to MemPalace (have a drawer_id). This prevents orphan
+        vault entries for turns that failed to write.
 
         Returns the RoundResult, or None if vault is not configured or
-        no turns were kept.
+        no turns qualify.
         """
         if self._round is None:
             return None
 
-        # Collect kept turns (LLM judged wiki-worthy)
+        # Collect kept turns that were successfully written
         kept_turns: list[TurnContent] = []
-        for event, extraction in zip(events, extractions, strict=False):
-            if extraction.get("verdict") != "keep":
+        for event, result in zip(events, results, strict=False):
+            if result.verdict != "keep" or not result.drawer_id:
                 continue
             role = event.payload.get("turn_role", "user")
             content = event.payload.get("content", "")
             if content:
-                kept_turns.append(TurnContent(role=role, content=content))
+                kept_turns.append(
+                    TurnContent(role=role, content=content, drawer_id=result.drawer_id)
+                )
 
         if not kept_turns:
             return None

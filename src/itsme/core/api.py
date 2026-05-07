@@ -723,6 +723,6 @@ def _discover_vault() -> AlephVault | None:
                     f"itsme: Aleph vault found at {candidate} but failed to open: {exc}",
                     file=sys.stderr,
                 )
-                return None
+                continue  # try next candidate
 
     return None
