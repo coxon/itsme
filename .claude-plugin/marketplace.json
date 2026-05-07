@@ -10,7 +10,7 @@
       "name": "itsme",
       "source": "./",
       "description": "Long-term memory: remember / ask / status, with passive capture hooks (SessionEnd / PreCompact / context-pressure).",
-      "version": "0.0.1a0",
+      "version": "0.0.3",
       "author": {
         "name": "coxon",
         "url": "https://github.com/coxon"
