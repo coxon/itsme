@@ -380,51 +380,27 @@ def test_hook_noop_when_disabled(
     assert captured == []
 
 
-# -------------------------------------- 10. cross-MCP-restart drawer loss
-# This documents a v0.0.1 known gap when MemPalace is *not* installed
-# alongside itsme: ``InMemoryMemPalaceAdapter`` is RAM only, so when the
-# MCP server restarts the drawers vanish — but the router's dedup key
-# (``memory.stored`` events) lives in the persistent ring, so the new
-# server skips the re-route. Net effect: drawer is silently lost across
-# CC sessions.
-#
-# Originally this gap blocked persistence unconditionally because
-# ``build_default_memory`` defaulted to ``inmemory``. After flipping the
-# default to ``auto`` (this PR), the gap only manifests when MemPalace
-# is missing from the environment — which is exactly the case in CI, so
-# the test still asserts the lossy behavior. Once the test environment
-# itself starts shipping with MemPalace (or once we mock the stdio
-# adapter into ``build_default_memory`` here), the assertion will need
-# to flip.
+# -------------------------------------- 10. cross-restart drawer persistence
+# With mempalace installed as an optional dependency (pyproject.toml
+# ``[project.optional-dependencies] mempalace``), ``build_default_memory``
+# resolves the ``auto`` backend to ``StdioMemPalaceAdapter`` and drawers
+# persist across restarts.
 
 
-def test_cross_restart_drawer_loss_v001_known_gap(db_path: Path) -> None:
-    """v0.0.1 known gap — drawer lost across MCP server restart when
-    MemPalace isn't installed.
+def test_cross_restart_drawer_survives(db_path: Path) -> None:
+    """Cross-restart drawer survival — MemPalace persists drawers.
 
-    Critically, both processes go through ``build_default_memory`` (the
-    same factory the MCP server uses). With the post-T1.13.5 default of
-    ``ITSME_MEMPALACE_BACKEND=auto``, this lands on the inmemory
-    fallback when MemPalace isn't on PATH (the CI condition). Once test
-    fixtures provide MemPalace, this test will fail and the assertion
-    flips to ``len(res.sources) == 1``.
+    Both processes go through ``build_default_memory`` (the same factory
+    the MCP server uses). With ``mempalace`` installed in the venv,
+    ``ITSME_MEMPALACE_BACKEND=auto`` resolves to the persistent stdio
+    backend, so drawers written in process A are visible in process B.
     """
     # Session 1: write through process A.
     mem_a = build_default_memory(project="restart", db_path=db_path)
     mem_a.remember("alpha-restart-token", kind="fact")
-    # Process A would normally close MemPalace here. Drawers go away.
     mem_a.close()
 
-    # Session 2: a fresh process opens the same events ring via the
-    # production factory. With ``ITSME_MEMPALACE_BACKEND=auto`` (the
-    # post-T1.13.5 default), this lands on the inmemory fallback when
-    # MemPalace isn't on PATH — exactly the CI condition. The router's
-    # dedup keys off the persistent ring, so it sees ``memory.stored``
-    # already → skips the ``raw.captured`` → adapter B stays empty.
-    # Once the test environment provides MemPalace (so the ``auto``
-    # path resolves to the persistent stdio backend), the same code
-    # path will return the drawer and the assertion below will need to
-    # flip to ``len(res.sources) == 1``.
+    # Session 2: a fresh process opens the same events ring + palace.
     mem_b = build_default_memory(project="restart", db_path=db_path)
 
     scheduler = WorkerScheduler()
@@ -439,13 +415,12 @@ def test_cross_restart_drawer_loss_v001_known_gap(db_path: Path) -> None:
     finally:
         scheduler.stop()
 
-    # The smoke fact: ask in process B finds nothing.
+    # Drawer persisted — process B can find it.
     res = mem_b.ask("alpha-restart-token")
     mem_b.close()
-    assert res.sources == [], (
-        "Cross-restart drawer survival landed earlier than expected — "
-        "T1.13.5 (persistent MemPalace adapter) likely shipped. Flip the "
-        "assertion to ``len(res.sources) == 1`` and update the docstring."
+    assert len(res.sources) >= 1, (
+        "Cross-restart drawer not found — is MemPalace installed? "
+        "(pip install mempalace or uv pip install mempalace)"
     )
 
 
