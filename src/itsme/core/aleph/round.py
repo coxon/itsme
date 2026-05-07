@@ -1,10 +1,10 @@
-"""Aleph Round — consolidate MemPalace turns into vault wiki pages.
+"""Aleph Round — consolidate MemPalace turns into wiki pages.
 
 Takes filtered, meaningful conversation turns from MemPalace and
-uses the LLM to decide which Aleph vault pages to create or update.
+uses the LLM to decide which Aleph wiki pages to create or update.
 This is the "extraction → Aleph" step in the pipeline:
 
-    对话 → intake filter → MemPalace → **Aleph round** → Obsidian vault
+    对话 → intake filter → MemPalace → **Aleph round** → wiki pages
 
 The round is NOT per-turn. It processes a batch of turns and makes
 wiki-level decisions: entity resolution, page creation vs update,
@@ -20,7 +20,7 @@ from datetime import date
 from importlib.resources import files as _files
 from typing import Any
 
-from itsme.core.aleph.vault import AlephVault, IndexEntry, PageMeta
+from itsme.core.aleph.wiki import Aleph, IndexEntry, PageMeta
 from itsme.core.llm import LLMProvider, LLMUnavailableError
 
 _logger = logging.getLogger(__name__)
@@ -64,19 +64,19 @@ class TurnContent:
 
 
 class AlephRound:
-    """Consolidate conversation turns into Aleph vault wiki pages.
+    """Consolidate conversation turns into Aleph wiki pages.
 
     Args:
-        vault: AlephVault adapter for reading/writing the Obsidian vault.
+        aleph: Aleph adapter for reading/writing the Obsidian wiki.
         llm: LLM provider for entity extraction and page decisions.
     """
 
-    def __init__(self, *, vault: AlephVault, llm: LLMProvider) -> None:
-        self._vault = vault
+    def __init__(self, *, aleph: Aleph, llm: LLMProvider) -> None:
+        self._aleph = aleph
         self._llm = llm
 
     def process(self, turns: list[TurnContent]) -> RoundResult:
-        """Process a batch of turns into vault page operations.
+        """Process a batch of turns into wiki page operations.
 
         Steps:
         1. Build context: existing pages list + turn content
@@ -96,7 +96,7 @@ class AlephRound:
         result = RoundResult()
 
         # Step 1: Get existing pages for entity resolution
-        existing = self._vault.list_pages()
+        existing = self._aleph.list_pages()
         existing_summary = self._format_existing_pages(existing)
 
         # Step 2: Format turns
@@ -147,7 +147,7 @@ class AlephRound:
         # Step 5: Update index and log
         if new_index_entries:
             try:
-                self._vault.update_index(new_index_entries)
+                self._aleph.update_index(new_index_entries)
             except Exception as exc:
                 _logger.error("aleph round: index update failed: %s", exc)
                 result.errors.append(f"index_error: {exc}")
@@ -159,7 +159,7 @@ class AlephRound:
             summary_parts.append(f"更新 {result.pages_updated} 页")
         if summary_parts:
             try:
-                self._vault.append_log(
+                self._aleph.append_log(
                     action="INGEST",
                     source="itsme:aleph-round",
                     summary="，".join(summary_parts),
@@ -187,7 +187,7 @@ class AlephRound:
     @staticmethod
     def _format_existing_pages(pages: list[PageMeta]) -> str:
         if not pages:
-            return "(empty vault — no existing pages)"
+            return "(empty wiki — no existing pages)"
         lines: list[str] = []
         for p in pages:
             lines.append(f"- `{p.path.stem}` ({p.type}, {p.domain}/{p.subcategory}): {p.summary}")
@@ -233,7 +233,7 @@ class AlephRound:
             body += f"> [!info] 核心摘要\n> {body_section}\n\n"
         body += f"## History\n{history_entry}\n"
 
-        self._vault.write_page(
+        self._aleph.write_page(
             slug=slug,
             domain=domain,
             subcategory=subcategory,
@@ -244,7 +244,7 @@ class AlephRound:
     def _execute_update(self, op: dict[str, Any], today: str) -> None:
         """Update an existing wiki page from an LLM operation."""
         slug = op["slug"]
-        meta = self._vault.find_page(slug)
+        meta = self._aleph.find_page(slug)
         if meta is None:
             raise FileNotFoundError(f"Page not found for update: {slug}")
 
@@ -256,7 +256,7 @@ class AlephRound:
         if op.get("summary"):
             fm_updates["summary"] = op["summary"]
 
-        self._vault.update_page(
+        self._aleph.update_page(
             meta.path,
             frontmatter_updates=fm_updates,
             append_body=op.get("append_body", ""),
@@ -268,7 +268,7 @@ class AlephRound:
 
         Returns None if the page is not found (caller should skip upsert).
         """
-        meta = self._vault.find_page(slug)
+        meta = self._aleph.find_page(slug)
         if meta is None:
             _logger.warning("aleph round: page %r not found for index entry, skipping", slug)
             return None

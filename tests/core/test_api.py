@@ -110,8 +110,8 @@ def test_ask_unsupported_modes_raise(memory: Memory, mode: str) -> None:
         memory.ask("q", mode=cast(Literal["now"], mode))
 
 
-def test_ask_wiki_no_vault(memory: Memory) -> None:
-    """ask(mode=wiki) with no vault returns empty results, no error."""
+def test_ask_wiki_no_aleph(memory: Memory) -> None:
+    """ask(mode=wiki) with no Aleph returns empty results, no error."""
     result = memory.ask("anything", mode="wiki")
     assert result.sources == []
     assert result.queried_event_id

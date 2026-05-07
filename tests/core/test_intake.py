@@ -73,7 +73,7 @@ class TestDegradedMode:
         assert all(r.verdict == "skip" for r in results)  # no LLM = skip
         assert all(r.skip_reason == "llm_unavailable" for r in results)
 
-    def test_no_vault_pages_in_degraded(self, bus, adapter) -> None:
+    def test_no_wiki_pages_in_degraded(self, bus, adapter) -> None:
         events = _make_raw_events(bus, [("user", "test content")])
         processor = IntakeProcessor(
             bus=bus,
@@ -82,7 +82,7 @@ class TestDegradedMode:
             wing="wing_test",
         )
         processor.process_batch(events)
-        # No vault, no crash — just MemPalace writes
+        # No Aleph, no crash — just MemPalace writes
 
 
 # -------------------------------------------------------- with LLM
