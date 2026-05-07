@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from itsme.core.aleph.round import AlephRound, TurnContent, _parse_round_response
+from itsme.core.aleph.round import (
+    ROUND_MAX_TOKENS,
+    AlephRound,
+    TurnContent,
+    _parse_round_response,
+)
 from itsme.core.aleph.wiki import Aleph
 from itsme.core.llm import StubProvider
 
@@ -348,6 +353,16 @@ class TestRoundLLMEdgeCases:
         result = rnd.process([TurnContent(role="user", content="important stuff")])
         # Degraded: empty response → no operations
         assert result.pages_created == 0
+
+    def test_round_passes_elevated_max_tokens(self, aleph: Aleph) -> None:
+        """AlephRound requests ROUND_MAX_TOKENS (8192), not default 2048."""
+        llm = StubProvider(response="[]")
+        rnd = AlephRound(aleph=aleph, llm=llm)
+        rnd.process([TurnContent(role="user", content="test content")])
+
+        assert len(llm.calls) == 1
+        assert llm.calls[0]["max_tokens"] == ROUND_MAX_TOKENS
+        assert ROUND_MAX_TOKENS > 2048  # sanity: meaningfully larger
 
 
 # ============================================================

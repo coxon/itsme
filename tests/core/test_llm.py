@@ -210,6 +210,39 @@ class TestDeepSeekProvider:
             result = provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
         assert result == "recovered"
 
+    def test_truncation_warning_logged(self) -> None:
+        """finish_reason=length triggers a truncation warning."""
+        import httpx
+
+        fake_response = httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": "partial"},
+                        "finish_reason": "length",
+                    }
+                ],
+                "usage": {"completion_tokens": 2048},
+            },
+        )
+
+        mc = _mock_client(response=fake_response)
+        provider = DeepSeekProvider(api_key="sk-ok", model="m")
+        import logging
+
+        with (
+            patch("httpx.Client", return_value=mc),
+            patch.object(logging.getLogger("itsme.core.llm"), "warning") as mock_warn,
+        ):
+            result = provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
+
+        assert result == "partial"
+        mock_warn.assert_called_once()
+        warn_msg = mock_warn.call_args[0][0]
+        assert "truncated" in warn_msg
+        assert "finish_reason=length" in warn_msg
+
     def test_empty_choices_returns_empty(self) -> None:
         import httpx
 
