@@ -450,7 +450,7 @@ hook 触发（before-clear / before-exit / before-compact）
               ▼
         intake worker consumes (async)
               │
-              ├── ③ LLM intake (Haiku): 每 turn → keep/skip + {summary, entities, claims}
+              ├── ③ LLM intake: 每 turn → keep/skip + {summary, entities, claims}
               │
               ├── ALL turns → MemPalace.add_drawer(raw_text)（全量入库，不筛）
               │                 events.append(memory.stored)
@@ -655,7 +655,7 @@ itsme/                            # git repo root
 | D9 | **Python 全栈** | 与 MemPalace 同语言、生态成熟 vs CC plugin TS 生态对接需 bridge |
 | D10 | **不做 per-turn hook**，只做 consolidation hook | 噪音低 vs 漏掉一些"想记没记"的瞬间（由 explicit remember 兜底） |
 | D11 | **ask 双引擎并行**（Aleph structured + MemPalace raw）→ 合并 | 高精度 + 高召回 vs 合并逻辑复杂 |
-| D12 | **Intake LLM (Haiku) 跑在 router async loop**，不在 hook 进程里 | 不阻塞 hook 超时 vs intake 有延迟 |
+| D12 | **Intake LLM 跑在 router async loop**，不在 hook 进程里 | 不阻塞 hook 超时 vs intake 有延迟 |
 | D13 | **explicit `remember()` 不走 intake**（直存 MemPalace） | fast-path 保持同步 vs explicit 写入没有结构化搜索面 |
 | D14 | **Aleph v0.0.2 = extraction index**（sqlite + FTS5），v0.0.3 升 wiki | 快速落地 + 渐进增强 vs 两步迁移成本 |
 | D15 | **MemPalace 全量存 raw**（包括 LLM 判断为 skip 的 turn） | 永远不丢 vs 搜索有噪音（Aleph 层过滤） |

@@ -131,15 +131,15 @@ class TestBuildLLMProvider:
             provider = build_llm_provider()
             assert isinstance(provider, AnthropicProvider)
 
-    def test_promoter_role_uses_promoter_model_env(self) -> None:
+    def test_custom_model_env(self) -> None:
         mock_anthropic = MagicMock()
         with (
             patch.dict(
                 os.environ,
-                {"ANTHROPIC_API_KEY": "sk-test", "ITSME_LLM_PROMOTER_MODEL": "my-sonnet"},
+                {"ANTHROPIC_API_KEY": "sk-test", "ITSME_LLM_MODEL": "my-custom-model"},
             ),
             patch.dict("sys.modules", {"anthropic": mock_anthropic}),
         ):
-            provider = build_llm_provider(role="promoter")
+            provider = build_llm_provider()
             assert isinstance(provider, AnthropicProvider)
-            assert provider._model == "my-sonnet"  # noqa: SLF001 — test internals
+            assert provider._model == "my-custom-model"  # noqa: SLF001 — test internals

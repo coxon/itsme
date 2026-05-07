@@ -25,7 +25,7 @@
 - ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（`core/adapters/mempalace.py`）+ **stdio MCP-client backend 已落地**（`core/adapters/mempalace_stdio.py`，T1.13.5，v0.0.1 GA），由 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 - ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
-- ✅ Intake 模型：**Haiku 4.5**（高频 per-turn extraction，~$0.006/fire）；Promoter/Fusion：**Sonnet 4.6**（低频 consolidation）；可通过 `$ITSME_LLM_MODEL` / `$ITSME_LLM_PROMOTER_MODEL` 覆盖
+- ✅ LLM 模型：统一用 **Sonnet 4.6**（`$ITSME_LLM_MODEL` 可覆盖）；v0.0.3+ 按需拆分 intake/promoter 模型
 - ✅ Aleph v0.0.2 形态：**per-turn extraction index**（sqlite + FTS5），不含 wiki consolidation / vault 写入 / merge / crosslink。完整 Aleph pipeline 推迟到 v0.0.3
 - ✅ ask 搜索策略：**双引擎并行**（Aleph structured + MemPalace raw）→ 合并去重返回。结构化层是**搜索增强器，不是替代器**——LLM 提取遗漏时 MemPalace raw 兜底，永远不漏
 - ✅ Intake 运行位置：**router 异步 consume loop**（不阻塞 hook 进程）；explicit `remember()` 不走 intake，保持同步 fast-path
@@ -102,7 +102,7 @@
 
 > **设计原则**：MemPalace 是"什么都记"的原料仓——搜索面是 raw 全文。Aleph extraction index 是 LLM 提取的结构化搜索增强层。`ask` 搜两路合并，**结构化层漏提取时 MemPalace raw 兜底，永远不丢**。
 
-> **成本**：Intake 用 Haiku 4.5，~$0.006/fire。轻度使用 ~$1/月，重度 ~$11/月。
+> **成本**：Intake 用 Sonnet 4.6（统一模型，`$ITSME_LLM_MODEL` 可覆盖），v0.0.3+ 视成本按需拆分。
 
 ### Tasks
 
@@ -113,7 +113,7 @@
 
 #### LLM 基础设施
 
-- [x] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `AnthropicProvider` 实现。支持 model 配置（`$ITSME_LLM_MODEL` 默认 Haiku 4.5，`$ITSME_LLM_PROMOTER_MODEL` 默认 Sonnet 4.6）。最小接口：`complete(system, messages) → str`。依赖 `anthropic` SDK（加入 `pyproject.toml` optional deps）。
+- [x] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `AnthropicProvider` 实现。统一模型配置（`$ITSME_LLM_MODEL` 默认 Sonnet 4.6）。最小接口：`complete(system, messages) → str`。依赖 `anthropic` SDK（加入 `pyproject.toml` optional deps）。
 
 #### Aleph Extraction Index（轻量 — 不含 wiki / vault）
 
@@ -126,7 +126,7 @@
 - [x] **T2.0d** **LLM intake processor**（`core/workers/intake.py`）：
   - 在 router 异步 consume loop 中运行（不阻塞 hook 进程的 15s 超时）
   - 消费结构性清洗 + turn 切片后的 `raw.captured` 批次
-  - 一次 Haiku LLM 调用，批量处理所有 turn：
+  - 一次 LLM 调用，批量处理所有 turn：
     - keep → 提取 `{summary, entities, claims}`
     - skip → 标记 `skip_reason`（低信息 / 重复 / boilerplate）
   - **所有 turn**（keep + skip）→ `MemPalace.write(raw_turn, wing, room)`（全量入库）

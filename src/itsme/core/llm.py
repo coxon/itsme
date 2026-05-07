@@ -11,10 +11,9 @@ Provider selection:
 
 Model configuration:
 
-* ``$ITSME_LLM_MODEL`` — intake model (default Haiku 4.5).
-* ``$ITSME_LLM_PROMOTER_MODEL`` — promoter / fusion model (v0.0.3,
-  default Sonnet 4.6). Not used in v0.0.2 but resolved here so
-  callers don't need to touch env vars directly.
+* ``$ITSME_LLM_MODEL`` — single model for all LLM calls (default
+  Sonnet 4.6). v0.0.2 uses one model for everything; role-specific
+  model selection is deferred to v0.0.3+ if cost warrants it.
 
 Usage::
 
@@ -35,11 +34,8 @@ _logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------- defaults
 
-#: Haiku 4.5 — high throughput, low cost, ideal for intake extraction.
-DEFAULT_INTAKE_MODEL: str = "claude-haiku-4-5-20260514"
-
-#: Sonnet 4.6 — balanced, for promoter / fusion (v0.0.3).
-DEFAULT_PROMOTER_MODEL: str = "claude-sonnet-4-6-20260514"
+#: Single default model for all LLM calls in v0.0.2.
+DEFAULT_MODEL: str = "claude-sonnet-4-6-20260514"
 
 #: Default max output tokens for a single LLM call.
 DEFAULT_MAX_TOKENS: int = 2048
@@ -91,7 +87,7 @@ class AnthropicProvider:
 
     Args:
         model: Model id override. Defaults to ``$ITSME_LLM_MODEL``
-            or :data:`DEFAULT_INTAKE_MODEL`.
+            or :data:`DEFAULT_MODEL`.
         api_key: API key override. Defaults to ``$ANTHROPIC_API_KEY``.
         max_tokens: Default max output tokens (can be overridden per call).
     """
@@ -103,7 +99,7 @@ class AnthropicProvider:
         api_key: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
     ) -> None:
-        self._model = model or os.environ.get("ITSME_LLM_MODEL", DEFAULT_INTAKE_MODEL)
+        self._model = model or os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
         self._max_tokens = max_tokens
 
         resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or ""
@@ -194,12 +190,8 @@ class StubProvider:
 # ----------------------------------------------------------- factory
 
 
-def build_llm_provider(*, role: str = "intake") -> LLMProvider | None:
+def build_llm_provider() -> LLMProvider | None:
     """Auto-detect and construct the best available LLM provider.
-
-    Args:
-        role: ``"intake"`` (default, uses ``$ITSME_LLM_MODEL``) or
-            ``"promoter"`` (uses ``$ITSME_LLM_PROMOTER_MODEL``).
 
     Returns:
         An :class:`AnthropicProvider` if ``$ANTHROPIC_API_KEY`` is set
@@ -211,10 +203,7 @@ def build_llm_provider(*, role: str = "intake") -> LLMProvider | None:
         _logger.info("itsme: no ANTHROPIC_API_KEY — LLM provider unavailable, will degrade")
         return None
 
-    if role == "promoter":
-        model = os.environ.get("ITSME_LLM_PROMOTER_MODEL", DEFAULT_PROMOTER_MODEL)
-    else:
-        model = os.environ.get("ITSME_LLM_MODEL", DEFAULT_INTAKE_MODEL)
+    model = os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
 
     try:
         return AnthropicProvider(model=model, api_key=api_key)

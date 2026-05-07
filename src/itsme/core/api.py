@@ -567,7 +567,7 @@ def build_default_memory(
     if aleph is None:
         aleph = Aleph()  # uses default path
     if llm is None:
-        llm = build_llm_provider(role="intake")
+        llm = build_llm_provider()
         if llm is None:
             print(
                 "itsme: no ANTHROPIC_API_KEY set — intake runs in degraded mode "

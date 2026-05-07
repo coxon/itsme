@@ -4,7 +4,7 @@ Processes hook-captured ``raw.captured`` events through the LLM intake
 pipeline:
 
 1. Groups per-turn events by ``capture_batch_id``
-2. Sends the batch to the LLM (Haiku) for extraction
+2. Sends the batch to the LLM for extraction
 3. Writes ALL turns to MemPalace (raw, full recall)
 4. Writes KEEP turns to Aleph extraction index (structured, high precision)
 5. Emits ``raw.triaged`` for observability
