@@ -30,7 +30,6 @@ from itsme.core.adapters import (
     MemPalaceHit,
 )
 from itsme.core.adapters.naming import wing as _wing
-from itsme.core.aleph.api import Aleph
 from itsme.core.aleph.vault import AlephVault
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
@@ -65,7 +64,7 @@ class AskSource(BaseModel):
     """One row of provenance behind :class:`AskResult`."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    kind: Literal["verbatim", "wiki", "extraction"]
+    kind: Literal["verbatim", "wiki"]
     ref: str
     content: str
     score: float
@@ -117,8 +116,6 @@ class Memory:
             :class:`InMemoryMemPalaceAdapter` so tests and bare-bones
             development just work.
         project: Project name; becomes the default wing prefix.
-        aleph: Optional :class:`Aleph` instance for dual-engine search
-            (v0.0.2). When None, ``mode='auto'`` degrades to verbatim.
         llm: Optional :class:`LLMProvider` for intake processing.
             When None, intake degrades to raw MemPalace writes only.
         vault: Optional :class:`AlephVault` for Obsidian wiki integration.
@@ -132,7 +129,6 @@ class Memory:
         bus: EventBus,
         adapter: MemPalaceAdapter | None = None,
         project: str = "default",
-        aleph: Aleph | None = None,
         llm: LLMProvider | None = None,
         vault: AlephVault | None = None,
     ) -> None:
@@ -140,23 +136,18 @@ class Memory:
         self._adapter: MemPalaceAdapter = adapter or InMemoryMemPalaceAdapter()
         self._wing = _wing(project)
         self._router = Router(bus=self._bus, adapter=self._adapter, wing=self._wing)
-        self._aleph = aleph
         self._llm = llm
         self._vault = vault
 
         # Build intake processor for hook captures (replaces router
-        # consume_loop for non-explicit sources in v0.0.2).
-        if self._aleph is not None:
-            self._intake = IntakeProcessor(
-                bus=self._bus,
-                adapter=self._adapter,
-                aleph=self._aleph,
-                llm=self._llm or StubProvider(),
-                wing=self._wing,
-                vault=self._vault,
-            )
-        else:
-            self._intake = None
+        # consume_loop for non-explicit sources).
+        self._intake = IntakeProcessor(
+            bus=self._bus,
+            adapter=self._adapter,
+            llm=self._llm or StubProvider(),
+            wing=self._wing,
+            vault=self._vault,
+        )
 
     # ------------------------------------------------------------------ remember
     def remember(
@@ -371,14 +362,14 @@ class Memory:
         wing_filter: str | None,
         limit: int,
     ) -> AskResult:
-        """Triple-engine search: Vault wiki + Aleph + MemPalace.
+        """Dual-engine search: Vault wiki + MemPalace.
 
-        When Aleph or vault is not wired (None), gracefully degrades.
+        When vault is not wired (None), gracefully degrades to
+        MemPalace-only.
         """
         hits = dual_search(
             question,
             adapter=self._adapter,
-            aleph=self._aleph,
             vault=self._vault,
             wing=wing_filter,
             limit=limit,
@@ -393,7 +384,6 @@ class Memory:
                 "mode": "auto",
                 "hit_count": len(hits),
                 "wiki_hits": wiki_hits,
-                "aleph_hits": sum(1 for h in hits if h.kind == "extraction"),
                 "mp_hits": sum(1 for h in hits if h.kind == "verbatim"),
                 "wing": wing_filter,
             },
@@ -514,33 +504,21 @@ class Memory:
     ) -> Coroutine[Any, Any, None]:
         """Return the background consume loop coroutine.
 
-        v0.0.2: when an :class:`IntakeProcessor` is wired (Aleph +
-        optional LLM), returns the intake loop — which groups by
-        ``capture_batch_id``, runs LLM extraction, and dual-writes to
-        MemPalace + Aleph.
-
-        Fallback (no Aleph): returns the router's consume loop
-        (v0.0.1 behavior — rule-based routing, MemPalace only).
+        Returns the intake loop — which groups by ``capture_batch_id``,
+        runs LLM extraction, and writes to MemPalace + vault.
 
         Used by ``itsme.mcp.server`` to register a background worker
         with the :class:`WorkerScheduler`.
         """
-        if self._intake is not None:
-            return self._intake.consume_loop(
-                ignore_sources=ignore_sources,
-                poll_interval=poll_interval,
-            )
-        return self._router.consume_loop(
+        return self._intake.consume_loop(
             ignore_sources=ignore_sources,
             poll_interval=poll_interval,
         )
 
     def close(self) -> None:
-        """Close the bus, adapter, and Aleph. Safe to call multiple times."""
+        """Close the bus and adapter. Safe to call multiple times."""
         self._adapter.close()
         self._bus.close()
-        if self._aleph is not None:
-            self._aleph.close()
         # AlephVault has no close — it's just a path wrapper
 
 
@@ -588,7 +566,6 @@ def build_default_memory(
     db_path: Path | None = None,
     capacity: int = 500,
     adapter: MemPalaceAdapter | None = None,
-    aleph: Aleph | None = None,
     llm: LLMProvider | None = None,
     vault: AlephVault | None = None,
 ) -> Memory:
@@ -597,10 +574,6 @@ def build_default_memory(
     Used by ``itsme.mcp.server`` to wire up a Memory instance from
     config without leaking pydantic / sqlite plumbing into the MCP
     layer.
-
-    If *aleph* is not passed, an :class:`Aleph` instance is created
-    at the default path (``~/.itsme/aleph.db`` or ``$ITSME_ALEPH_DB``).
-    This enables ``ask(mode='auto')`` out of the box.
 
     If *llm* is not passed, :func:`build_llm_provider` is called to
     auto-detect from ``$DEEPSEEK_API_KEY``. If no key is set, intake
@@ -627,14 +600,12 @@ def build_default_memory(
     bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
     if adapter is None:
         adapter = _select_mempalace_backend()
-    if aleph is None:
-        aleph = Aleph()  # uses default path
     if llm is None:
         llm = build_llm_provider()
         if llm is None:
             print(
                 "itsme: no DEEPSEEK_API_KEY set — intake runs in degraded mode "
-                "(raw MemPalace writes only, no Aleph extraction). "
+                "(raw MemPalace writes only, no vault consolidation). "
                 "Set DEEPSEEK_API_KEY to enable LLM intake.",
                 file=sys.stderr,
             )
@@ -644,7 +615,6 @@ def build_default_memory(
         bus=bus,
         adapter=adapter,
         project=project,
-        aleph=aleph,
         llm=llm,
         vault=vault,
     )

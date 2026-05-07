@@ -1,11 +1,11 @@
 """End-to-end verification tests — T2.23 through T2.26.
 
-These tests simulate the full v0.0.2 pipeline:
+These tests simulate the full pipeline:
   hook capture → envelope strip → turn slice → intake processor →
-  MemPalace + Aleph dual write → ask(mode=auto) dual-engine search.
+  MemPalace write → ask(mode=auto) search.
 
-T2.23: Full pipeline — capture → intake → dual search hits.
-T2.24: Aleph miss regression — MemPalace raw catches missed entities.
+T2.23: Full pipeline — capture → intake → search hits.
+T2.24: MemPalace raw catches anything LLM skipped.
 T2.25: LLM degradation — no API key → MemPalace writes still work.
 T2.26: Status feed shows MEMORY_ROUTED events with verdicts.
 """
@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
-from itsme.core.aleph.api import Aleph
 from itsme.core.api import Memory
 from itsme.core.events import EventBus, EventType
 from itsme.core.llm import StubProvider
@@ -38,13 +37,6 @@ def bus(tmp_path: Path) -> Iterator[EventBus]:
 @pytest.fixture
 def adapter() -> InMemoryMemPalaceAdapter:
     return InMemoryMemPalaceAdapter()
-
-
-@pytest.fixture
-def aleph() -> Iterator[Aleph]:
-    a = Aleph(":memory:")
-    yield a
-    a.close()
 
 
 def _emit_hook_turns(
@@ -79,12 +71,10 @@ def _emit_hook_turns(
 
 
 class TestT223EndToEnd:
-    """Capture → intake → Aleph + MemPalace → ask(mode=auto) hits."""
+    """Capture → intake → MemPalace → ask(mode=auto) hits."""
 
-    def test_full_pipeline(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
-    ) -> None:
-        """User conversation → hook capture → intake → dual search finds it."""
+    def test_full_pipeline(self, bus: EventBus, adapter: InMemoryMemPalaceAdapter) -> None:
+        """User conversation → hook capture → intake → search finds it."""
         # LLM stub returns structured extractions
         llm = StubProvider(
             response=json.dumps(
@@ -130,29 +120,26 @@ class TestT223EndToEnd:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
         results = processor.process_batch(events)
 
-        # Step 3: Verify dual writes
+        # Step 3: Verify writes
         assert len(results) == 2
         assert all(r.verdict == "keep" for r in results)
         assert all(r.drawer_id for r in results)  # MemPalace written
-        assert all(r.extraction_id for r in results)  # Aleph written
-        assert aleph.count() == 2  # 2 extractions
 
-        # Step 4: ask(mode=auto) finds it through Aleph
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        # Step 4: ask(mode=auto) finds it through MemPalace
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("Postgres database", mode="auto")
 
-        aleph_sources = [s for s in result.sources if s.kind == "extraction"]
-        assert len(aleph_sources) >= 1
-        assert any("Postgres" in s.content for s in aleph_sources)
+        mp_sources = [s for s in result.sources if s.kind == "verbatim"]
+        assert len(mp_sources) >= 1
+        assert any("Postgres" in s.content for s in mp_sources)
 
     def test_pipeline_with_skip_turns(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
         """Skipped turns still end up in MemPalace for recall."""
         llm = StubProvider(
@@ -190,7 +177,6 @@ class TestT223EndToEnd:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
@@ -203,79 +189,22 @@ class TestT223EndToEnd:
         # All 3 in MemPalace (including skipped)
         assert all(r.drawer_id for r in results)
 
-        # Only 2 in Aleph (keep only)
-        assert aleph.count() == 2
-
-        # ask(mode=auto) finds both keep turns
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        # ask(mode=auto) finds keep turns
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("AWS deployment", mode="auto")
         assert len(result.sources) >= 1
 
 
 # ============================================================
-# T2.24 — Aleph miss regression
+# T2.24 — MemPalace raw catches missed entities
 # ============================================================
 
 
-class TestT224AlephMissRegression:
-    """LLM didn't extract an entity → MemPalace raw search catches it."""
-
-    def test_missed_entity_found_via_mempalace(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
-    ) -> None:
-        """Entity mentioned in passing (not extracted by LLM) still searchable."""
-        # LLM extracts the main entity but misses "Portland" (secondary mention)
-        llm = StubProvider(
-            response=json.dumps(
-                [
-                    {
-                        "verdict": "keep",
-                        "summary": "Meeting with the DevOps team about Kubernetes migration",
-                        "entities": [
-                            {"name": "DevOps team", "type": "company"},
-                            {"name": "Kubernetes", "type": "tool"},
-                        ],
-                        "claims": ["Kubernetes migration planned"],
-                        # NOTE: "Portland" is NOT extracted — LLM missed it
-                    },
-                ]
-            )
-        )
-
-        events = _emit_hook_turns(
-            bus,
-            [
-                (
-                    "user",
-                    "Had a meeting with the DevOps team in Portland about Kubernetes migration",
-                ),
-            ],
-        )
-
-        processor = IntakeProcessor(
-            bus=bus,
-            adapter=adapter,
-            aleph=aleph,
-            llm=llm,
-            wing="wing_test",
-        )
-        processor.process_batch(events)
-
-        # Aleph does NOT find "Portland" (wasn't extracted)
-        aleph_hits = aleph.search("Portland")
-        assert len(aleph_hits) == 0
-
-        # But ask(mode=auto) DOES find it via MemPalace raw
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
-        result = memory.ask("Portland", mode="auto")
-
-        # MemPalace raw text contains "Portland" — dual search catches it
-        mp_sources = [s for s in result.sources if s.kind == "verbatim"]
-        assert len(mp_sources) >= 1
-        assert any("Portland" in s.content for s in mp_sources)
+class TestT224MemPalaceCatchesMissed:
+    """LLM skipped a turn → MemPalace raw search catches it."""
 
     def test_completely_missed_turn_found_via_mempalace(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
         """Turn where LLM says 'skip' is still findable in MemPalace."""
         llm = StubProvider(
@@ -297,17 +226,13 @@ class TestT224AlephMissRegression:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
         processor.process_batch(events)
 
-        # Nothing in Aleph (skip verdict)
-        assert aleph.count() == 0
-
         # But raw text is in MemPalace
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("SQLite test suite", mode="auto")
 
         assert len(result.sources) >= 1
@@ -323,13 +248,12 @@ class TestT225LLMDegradation:
     """No API key / LLM unavailable → raw writes still work."""
 
     def test_degraded_intake_writes_to_mempalace(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
         """With bare StubProvider (no response = degraded), MP writes succeed."""
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=StubProvider(),  # bare = degraded mode
             wing="wing_test",
         )
@@ -345,13 +269,11 @@ class TestT225LLMDegradation:
 
         # All turns written to MemPalace
         assert all(r.drawer_id for r in results)
-        # No Aleph entries (degraded)
-        assert aleph.count() == 0
         # All verdicts are skip (degraded)
         assert all(r.verdict == "skip" for r in results)
 
     def test_degraded_ask_verbatim_still_works(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
         """ask(mode=verbatim) works without LLM — pure MemPalace search."""
         # Write directly to MemPalace (simulating prior degraded intake)
@@ -361,7 +283,7 @@ class TestT225LLMDegradation:
             room="room_general",
         )
 
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("microservices", mode="verbatim")
 
         assert result.queried_event_id
@@ -369,30 +291,30 @@ class TestT225LLMDegradation:
         assert all(s.kind == "verbatim" for s in result.sources)
 
     def test_degraded_ask_auto_falls_back_to_mempalace(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
-        """ask(mode=auto) with empty Aleph still returns MemPalace hits."""
+        """ask(mode=auto) with no vault still returns MemPalace hits."""
         adapter.write(
             content="Redis caching layer deployed in production",
             wing="wing_test",
             room="room_general",
         )
 
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("Redis production", mode="auto")
 
-        # Should get MemPalace hits even with empty Aleph
+        # Should get MemPalace hits
         mp_sources = [s for s in result.sources if s.kind == "verbatim"]
         assert len(mp_sources) >= 1
 
-    def test_memory_without_aleph_still_functions(
+    def test_memory_without_vault_still_functions(
         self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
-        """Memory with aleph=None → auto mode degrades gracefully."""
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=None)
+        """Memory without vault → auto mode degrades gracefully."""
+        memory = Memory(bus=bus, adapter=adapter, project="test")
 
         adapter.write(
-            content="No Aleph but still searchable",
+            content="No vault but still searchable",
             wing="wing_test",
             room="room_general",
         )
@@ -410,7 +332,7 @@ class TestT226StatusFeed:
     """MEMORY_ROUTED events carry verdict (skip/keep) for observability."""
 
     def test_status_shows_routed_events_with_verdict(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
         llm = StubProvider(
             response=json.dumps(
@@ -437,14 +359,13 @@ class TestT226StatusFeed:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
         processor.process_batch(events)
 
         # Status should show MEMORY_ROUTED events
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         status = memory.status(types=[EventType.MEMORY_ROUTED])
 
         assert status.count >= 2
@@ -453,7 +374,7 @@ class TestT226StatusFeed:
         assert "skip" in verdicts
 
     def test_status_shows_memory_stored_events(
-        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+        self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
         """MEMORY_STORED events from intake are visible in status."""
         llm = StubProvider(
@@ -469,13 +390,12 @@ class TestT226StatusFeed:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
         processor.process_batch(events)
 
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         status = memory.status(types=[EventType.MEMORY_STORED])
 
         stored_events = [e for e in status.events if e.source == "worker:intake"]

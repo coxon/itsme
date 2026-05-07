@@ -30,7 +30,7 @@ SERVER_INSTRUCTIONS = (
     "Long-term memory plugin: 3 verbs. "
     "remember(content, kind?) writes verbatim. "
     "ask(question, mode?) reads memory — mode='auto' (default) "
-    "uses triple-engine search (Vault wiki + Aleph structured + MemPalace raw), "
+    "uses dual-engine search (Vault wiki + MemPalace raw), "
     "mode='wiki' searches Obsidian vault pages only, "
     "mode='verbatim' searches MemPalace only. "
     "status(scope?, format?) shows recent activity."

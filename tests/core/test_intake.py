@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
-from itsme.core.aleph.api import Aleph
 from itsme.core.events import EventBus, EventType
 from itsme.core.llm import StubProvider
 from itsme.core.workers.intake import IntakeProcessor, _parse_intake_response
@@ -27,13 +26,6 @@ def bus(tmp_path: Path) -> Iterator[EventBus]:
 @pytest.fixture
 def adapter() -> InMemoryMemPalaceAdapter:
     return InMemoryMemPalaceAdapter()
-
-
-@pytest.fixture
-def aleph() -> Aleph:
-    a = Aleph(":memory:")
-    yield a
-    a.close()
 
 
 def _make_raw_events(bus: EventBus, turns: list[tuple[str, str]]) -> list:
@@ -59,7 +51,7 @@ def _make_raw_events(bus: EventBus, turns: list[tuple[str, str]]) -> list:
 
 
 class TestDegradedMode:
-    def test_writes_all_turns_to_mempalace(self, bus, adapter, aleph) -> None:
+    def test_writes_all_turns_to_mempalace(self, bus, adapter) -> None:
         """Even without LLM, all turns go to MemPalace."""
         events = _make_raw_events(
             bus,
@@ -71,7 +63,6 @@ class TestDegradedMode:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=StubProvider(),
             wing="wing_test",
         )
@@ -81,19 +72,17 @@ class TestDegradedMode:
         assert all(r.drawer_id for r in results)  # all written to MP
         assert all(r.verdict == "skip" for r in results)  # no LLM = skip
         assert all(r.skip_reason == "llm_unavailable" for r in results)
-        assert all(r.extraction_id == "" for r in results)  # no Aleph writes
 
-    def test_no_aleph_entries_in_degraded(self, bus, adapter, aleph) -> None:
+    def test_no_vault_pages_in_degraded(self, bus, adapter) -> None:
         events = _make_raw_events(bus, [("user", "test content")])
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=StubProvider(),
             wing="wing_test",
         )
         processor.process_batch(events)
-        assert aleph.count() == 0
+        # No vault, no crash — just MemPalace writes
 
 
 # -------------------------------------------------------- with LLM
@@ -103,7 +92,7 @@ class TestWithLLM:
     def _llm_response(self, extractions: list[dict]) -> StubProvider:
         return StubProvider(response=json.dumps(extractions))
 
-    def test_keep_turn_writes_mempalace_and_aleph(self, bus, adapter, aleph) -> None:
+    def test_keep_turn_writes_mempalace(self, bus, adapter) -> None:
         llm = self._llm_response(
             [
                 {
@@ -118,7 +107,6 @@ class TestWithLLM:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
@@ -128,17 +116,11 @@ class TestWithLLM:
         r = results[0]
         assert r.verdict == "keep"
         assert r.drawer_id  # MP written
-        assert r.extraction_id  # Aleph written
         assert r.summary == "User chose Postgres for concurrent writes"
         assert len(r.entities) == 1
         assert r.entities[0]["name"] == "Postgres"
 
-        # Verify Aleph has the extraction
-        assert aleph.count() == 1
-        hits = aleph.search("Postgres")
-        assert len(hits) >= 1
-
-    def test_skip_turn_writes_mempalace_only(self, bus, adapter, aleph) -> None:
+    def test_skip_turn_writes_mempalace_only(self, bus, adapter) -> None:
         llm = self._llm_response(
             [
                 {"verdict": "skip", "skip_reason": "procedural acknowledgment"},
@@ -148,7 +130,6 @@ class TestWithLLM:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
@@ -156,10 +137,8 @@ class TestWithLLM:
 
         assert results[0].verdict == "skip"
         assert results[0].drawer_id  # MP written (全量入库)
-        assert results[0].extraction_id == ""  # no Aleph
-        assert aleph.count() == 0
 
-    def test_mixed_batch(self, bus, adapter, aleph) -> None:
+    def test_mixed_batch(self, bus, adapter) -> None:
         llm = self._llm_response(
             [
                 {
@@ -188,7 +167,6 @@ class TestWithLLM:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
@@ -200,10 +178,8 @@ class TestWithLLM:
         assert results[2].verdict == "keep"
         # All 3 in MemPalace
         assert all(r.drawer_id for r in results)
-        # Only 2 in Aleph
-        assert aleph.count() == 2
 
-    def test_emits_memory_stored_events(self, bus, adapter, aleph) -> None:
+    def test_emits_memory_stored_events(self, bus, adapter) -> None:
         llm = self._llm_response(
             [
                 {"verdict": "keep", "summary": "Test", "entities": [], "claims": []},
@@ -213,7 +189,6 @@ class TestWithLLM:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
@@ -223,7 +198,7 @@ class TestWithLLM:
         assert len(stored) >= 1
         assert stored[0].source == "worker:intake"
 
-    def test_emits_routed_events_with_verdict(self, bus, adapter, aleph) -> None:
+    def test_emits_routed_events_with_verdict(self, bus, adapter) -> None:
         llm = self._llm_response(
             [
                 {"verdict": "keep", "summary": "Test", "entities": [], "claims": []},
@@ -233,7 +208,6 @@ class TestWithLLM:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
         )
@@ -243,11 +217,10 @@ class TestWithLLM:
         assert len(routed) >= 1
         assert routed[0].payload["verdict"] == "keep"
 
-    def test_empty_batch(self, bus, adapter, aleph) -> None:
+    def test_empty_batch(self, bus, adapter) -> None:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=StubProvider(),
             wing="wing_test",
         )

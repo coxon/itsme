@@ -1,24 +1,22 @@
-"""Tests for dual-engine search — T2.19.
+"""Tests for dual-engine search — vault wiki + MemPalace.
 
 Verifies:
-- Aleph-only hits (no MemPalace matches)
-- MemPalace-only hits (no Aleph / Aleph degraded)
-- Merged hits with dedup by drawer_id
-- Aleph hits ranked before MemPalace gap-fills
+- MemPalace-only hits (no vault)
+- Vault wiki + MemPalace merged hits
+- Vault hits ranked before MemPalace
 - Empty queries → empty results
 - Limit enforcement
-- Score normalization
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
-from itsme.core.aleph.api import Aleph
-from itsme.core.search import _normalize_fts5_rank, dual_search
+from itsme.core.aleph.vault import AlephVault
+from itsme.core.search import dual_search
 
 
 @pytest.fixture
@@ -27,10 +25,14 @@ def adapter() -> InMemoryMemPalaceAdapter:
 
 
 @pytest.fixture
-def aleph() -> Iterator[Aleph]:
-    a = Aleph(":memory:")
-    yield a
-    a.close()
+def vault(tmp_path: Path) -> AlephVault:
+    """Create a minimal test vault."""
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    (vault_root / "dna.md").write_text("# DNA\n")
+    (vault_root / "wings").mkdir()
+    (vault_root / "sources").mkdir()
+    return AlephVault(vault_root)
 
 
 def _write_mp(adapter: InMemoryMemPalaceAdapter, content: str) -> str:
@@ -39,24 +41,22 @@ def _write_mp(adapter: InMemoryMemPalaceAdapter, content: str) -> str:
     return res.drawer_id
 
 
-def _write_aleph(
-    aleph: Aleph,
-    summary: str,
-    *,
-    turn_id: str = "",
-    entities: list | None = None,
-    claims: list | None = None,
-) -> str:
-    """Write to Aleph and return extraction_id."""
-    ext = aleph.write_extraction(
-        turn_id=turn_id,
-        raw_event_id=f"evt-{turn_id}",
-        summary=summary,
-        entities=entities or [],
-        claims=claims or [],
-        source="test",
+def _write_vault_page(vault: AlephVault, slug: str, title: str, summary: str) -> None:
+    """Write a simple vault wiki page."""
+    vault.write_page(
+        slug=slug,
+        domain="technology",
+        subcategory="engineering",
+        frontmatter={
+            "title": title,
+            "type": "concept",
+            "domain": "technology",
+            "subcategory": "engineering",
+            "summary": summary,
+            "tags": [],
+        },
+        body=f"# {title}\n\n{summary}\n",
     )
-    return ext.id
 
 
 # ============================================================
@@ -65,103 +65,49 @@ def _write_aleph(
 
 
 class TestDualSearch:
-    def test_aleph_only_hit(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        """Aleph has the answer but MemPalace doesn't match."""
-        _write_aleph(
-            aleph,
-            "User chose Postgres for concurrent writes",
-            turn_id="d1",
-            entities=[{"name": "Postgres", "type": "database"}],
-            claims=["Postgres chosen for concurrent writes"],
-        )
-        _write_mp(adapter, "some unrelated content about cooking")
-
-        hits = dual_search("Postgres", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
-
-        assert len(hits) >= 1
-        aleph_hits = [h for h in hits if h.kind == "extraction"]
-        assert len(aleph_hits) == 1
-        assert "Postgres" in aleph_hits[0].content
-
-    def test_mempalace_only_hit(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        """MemPalace has the answer but Aleph doesn't match."""
+    def test_mempalace_only_hit(self, adapter: InMemoryMemPalaceAdapter) -> None:
+        """MemPalace has the answer, no vault."""
         _write_mp(adapter, "We decided to deploy on Monday morning")
-        _write_aleph(
-            aleph,
-            "User likes Python",
-            turn_id="d1",
-            entities=[{"name": "Python", "type": "language"}],
-        )
 
-        hits = dual_search("deploy Monday", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
+        hits = dual_search("deploy Monday", adapter=adapter, wing="wing_test", limit=5)
 
         mp_hits = [h for h in hits if h.kind == "verbatim"]
         assert len(mp_hits) >= 1
         assert "deploy" in mp_hits[0].content
 
-    def test_both_engines_hit_different_turns(
-        self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+    def test_vault_and_mempalace_hit(
+        self, adapter: InMemoryMemPalaceAdapter, vault: AlephVault
     ) -> None:
-        """Both engines return different turns — no dedup needed."""
+        """Both engines return results — merged correctly."""
         _write_mp(adapter, "We discussed database options last week")
-        _write_aleph(
-            aleph,
-            "Postgres selected for main DB",
-            turn_id="d2",
-            entities=[{"name": "Postgres", "type": "database"}],
-            claims=["Postgres selected"],
+        _write_vault_page(
+            vault, "postgres", "Postgres", "Relational database for concurrent writes"
         )
 
-        hits = dual_search("database", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
+        hits = dual_search("database", adapter=adapter, vault=vault, wing="wing_test", limit=5)
 
         kinds = {h.kind for h in hits}
-        assert "extraction" in kinds and "verbatim" in kinds
-        assert len(hits) >= 2
+        assert "wiki" in kinds
+        assert "verbatim" in kinds
 
-    def test_dedup_same_drawer_id(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        """Same turn matched by both engines — only one hit per drawer_id."""
-        drawer_id = _write_mp(adapter, "Use Postgres for the user service")
-        _write_aleph(
-            aleph,
-            "Postgres for user service",
-            turn_id=drawer_id,
-            entities=[{"name": "Postgres", "type": "database"}],
-            claims=["Postgres for user service"],
-        )
-
-        hits = dual_search("Postgres", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
-
-        # Same drawer_id should NOT appear twice
-        drawer_ids = [h.drawer_id for h in hits if h.drawer_id]
-        assert len(set(drawer_ids)) == len(drawer_ids)
-        # Aleph hit takes priority, MemPalace skipped for this drawer
-        aleph_hits = [h for h in hits if h.kind == "extraction"]
-        assert len(aleph_hits) >= 1
-
-    def test_aleph_ranked_before_mempalace(
-        self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
+    def test_vault_ranked_before_mempalace(
+        self, adapter: InMemoryMemPalaceAdapter, vault: AlephVault
     ) -> None:
-        """Aleph hits appear before MemPalace gap-fills."""
+        """Vault hits appear before MemPalace gap-fills."""
         _write_mp(adapter, "Redis is used for caching in production")
-        _write_aleph(
-            aleph,
-            "Redis deployed as cache layer",
-            turn_id="d-aleph",
-            entities=[{"name": "Redis", "type": "database"}],
-            claims=["Redis used for caching"],
-        )
+        _write_vault_page(vault, "redis", "Redis", "In-memory cache layer for production")
 
-        hits = dual_search("Redis caching", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
+        hits = dual_search("Redis caching", adapter=adapter, vault=vault, wing="wing_test", limit=5)
 
         assert len(hits) >= 2
-        # First hit should be extraction (Aleph)
-        assert hits[0].kind == "extraction"
+        # First hit should be wiki (vault)
+        assert hits[0].kind == "wiki"
 
-    def test_no_aleph_degrades_to_mempalace_only(self, adapter: InMemoryMemPalaceAdapter) -> None:
-        """When aleph=None, behaves like verbatim search."""
+    def test_no_vault_degrades_to_mempalace_only(self, adapter: InMemoryMemPalaceAdapter) -> None:
+        """When vault=None, behaves like verbatim search."""
         _write_mp(adapter, "Important decision about deployment")
 
-        hits = dual_search("deployment", adapter=adapter, aleph=None, wing="wing_test", limit=5)
+        hits = dual_search("deployment", adapter=adapter, vault=None, wing="wing_test", limit=5)
 
         assert len(hits) >= 1
         assert all(h.kind == "verbatim" for h in hits)
@@ -173,70 +119,24 @@ class TestDualSearch:
 
 
 class TestEdgeCases:
-    def test_empty_query(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        assert dual_search("", adapter=adapter, aleph=aleph, limit=5) == []
+    def test_empty_query(self, adapter: InMemoryMemPalaceAdapter) -> None:
+        assert dual_search("", adapter=adapter, limit=5) == []
 
-    def test_whitespace_query(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        assert dual_search("   ", adapter=adapter, aleph=aleph, limit=5) == []
+    def test_whitespace_query(self, adapter: InMemoryMemPalaceAdapter) -> None:
+        assert dual_search("   ", adapter=adapter, limit=5) == []
 
-    def test_limit_respected(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
+    def test_limit_respected(self, adapter: InMemoryMemPalaceAdapter) -> None:
         """Results never exceed limit."""
         for i in range(10):
             _write_mp(adapter, f"item {i} about testing")
-            _write_aleph(aleph, f"test item {i}", turn_id=f"d-{i}", claims=[f"test item {i}"])
 
-        hits = dual_search("test", adapter=adapter, aleph=aleph, wing="wing_test", limit=3)
+        hits = dual_search("test", adapter=adapter, wing="wing_test", limit=3)
         assert len(hits) <= 3
 
-    def test_no_results(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        """Query that matches nothing in either engine."""
-        hits = dual_search(
-            "xyzzy nonexistent term", adapter=adapter, aleph=aleph, wing="wing_test", limit=5
-        )
+    def test_no_results(self, adapter: InMemoryMemPalaceAdapter) -> None:
+        """Query that matches nothing."""
+        hits = dual_search("xyzzy nonexistent term", adapter=adapter, wing="wing_test", limit=5)
         assert hits == []
-
-    def test_aleph_error_degrades_gracefully(self, adapter: InMemoryMemPalaceAdapter) -> None:
-        """If Aleph search throws, fall back to MemPalace-only."""
-        _write_mp(adapter, "Important data about servers")
-
-        class BrokenAleph:
-            def search(self, query, *, limit=5):
-                raise RuntimeError("DB corrupted")
-
-        hits = dual_search(
-            "servers", adapter=adapter, aleph=BrokenAleph(), wing="wing_test", limit=5
-        )
-
-        # Should still get MemPalace results
-        assert len(hits) >= 1
-        assert all(h.kind == "verbatim" for h in hits)
-
-
-# ============================================================
-# Score normalization
-# ============================================================
-
-
-class TestScoreNormalization:
-    def test_negative_rank_maps_to_high_score(self) -> None:
-        """FTS5 rank -10 → score near 1.0."""
-        assert _normalize_fts5_rank(-10) > 0.9
-
-    def test_zero_rank_maps_to_half(self) -> None:
-        """FTS5 rank 0 → score 0.5."""
-        assert abs(_normalize_fts5_rank(0) - 0.5) < 0.01
-
-    def test_positive_rank_maps_to_low_score(self) -> None:
-        """FTS5 rank +10 → score near 0."""
-        assert _normalize_fts5_rank(10) < 0.1
-
-    def test_extreme_negative_clamped(self) -> None:
-        """Very negative rank → 1.0."""
-        assert _normalize_fts5_rank(-1000) == 1.0
-
-    def test_extreme_positive_clamped(self) -> None:
-        """Very positive rank → 0.0."""
-        assert _normalize_fts5_rank(1000) == 0.0
 
 
 # ============================================================
@@ -245,43 +145,39 @@ class TestScoreNormalization:
 
 
 class TestSearchHitStructure:
-    def test_aleph_hit_has_metadata(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
-        """Aleph hits carry entities/claims in metadata."""
-        _write_aleph(
-            aleph,
-            "Postgres for user service",
-            turn_id="d1",
-            entities=[{"name": "Postgres", "type": "database"}],
-            claims=["Postgres chosen"],
-        )
+    def test_vault_hit_has_metadata(
+        self, adapter: InMemoryMemPalaceAdapter, vault: AlephVault
+    ) -> None:
+        """Vault hits carry structured metadata."""
+        _write_vault_page(vault, "postgres", "Postgres", "Relational database")
 
-        hits = dual_search("Postgres", adapter=adapter, aleph=aleph, limit=5)
-        aleph_hits = [h for h in hits if h.kind == "extraction"]
-        assert len(aleph_hits) == 1
-        assert aleph_hits[0].metadata is not None
-        assert "entities" in aleph_hits[0].metadata
-        assert "claims" in aleph_hits[0].metadata
-        assert aleph_hits[0].extraction_id  # non-empty
+        hits = dual_search("Postgres", adapter=adapter, vault=vault, limit=5)
+        wiki_hits = [h for h in hits if h.kind == "wiki"]
+        assert len(wiki_hits) == 1
+        assert wiki_hits[0].metadata is not None
+        assert "title" in wiki_hits[0].metadata
+        assert wiki_hits[0].ref.startswith("vault:")
 
-    def test_mp_hit_has_no_metadata(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
+    def test_mp_hit_has_no_metadata(self, adapter: InMemoryMemPalaceAdapter) -> None:
         """MemPalace hits don't carry structured metadata."""
         _write_mp(adapter, "Some raw content about testing")
 
-        hits = dual_search("testing", adapter=adapter, aleph=aleph, limit=5)
+        hits = dual_search("testing", adapter=adapter, limit=5)
         mp_hits = [h for h in hits if h.kind == "verbatim"]
-        assert len(mp_hits) >= 1, "should have at least one verbatim hit"
+        assert len(mp_hits) >= 1
         assert mp_hits[0].metadata is None
-        assert mp_hits[0].extraction_id == ""
 
-    def test_ref_format(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
+    def test_ref_format(self, adapter: InMemoryMemPalaceAdapter, vault: AlephVault) -> None:
         """Refs follow the expected format."""
         _write_mp(adapter, "Ref format test content")
-        _write_aleph(aleph, "Ref format extraction", turn_id="d-ref", claims=["ref test"])
+        _write_vault_page(vault, "ref-test", "Ref Test", "Testing ref format")
 
-        hits = dual_search("ref format", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
+        hits = dual_search(
+            "ref format test", adapter=adapter, vault=vault, wing="wing_test", limit=5
+        )
 
         for h in hits:
-            if h.kind == "extraction":
-                assert h.ref.startswith("aleph:")
+            if h.kind == "wiki":
+                assert h.ref.startswith("vault:")
             elif h.kind == "verbatim":
                 assert h.ref.startswith("mempalace:")
