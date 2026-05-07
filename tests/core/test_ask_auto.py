@@ -47,9 +47,7 @@ def memory(bus: EventBus, adapter: InMemoryMemPalaceAdapter) -> Memory:
 
 
 @pytest.fixture
-def memory_with_aleph(
-    bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
-) -> Memory:
+def memory_with_aleph(bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> Memory:
     return Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
 
 

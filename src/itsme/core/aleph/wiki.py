@@ -116,8 +116,7 @@ class Aleph:
         resolved = path.resolve()
         if not str(resolved).startswith(str(self._root.resolve())):
             raise ValueError(
-                f"Path escapes Aleph root: {path} resolves to {resolved} "
-                f"(root: {self._root})"
+                f"Path escapes Aleph root: {path} resolves to {resolved} " f"(root: {self._root})"
             )
         return resolved
 

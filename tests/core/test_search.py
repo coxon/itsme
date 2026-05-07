@@ -75,14 +75,10 @@ class TestDualSearch:
         assert len(mp_hits) >= 1
         assert "deploy" in mp_hits[0].content
 
-    def test_wiki_and_mempalace_hit(
-        self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
-    ) -> None:
+    def test_wiki_and_mempalace_hit(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Both engines return results — merged correctly."""
         _write_mp(adapter, "We discussed database options last week")
-        _write_wiki_page(
-            aleph, "postgres", "Postgres", "Relational database for concurrent writes"
-        )
+        _write_wiki_page(aleph, "postgres", "Postgres", "Relational database for concurrent writes")
 
         hits = dual_search("database", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
@@ -145,9 +141,7 @@ class TestEdgeCases:
 
 
 class TestSearchHitStructure:
-    def test_wiki_hit_has_metadata(
-        self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
-    ) -> None:
+    def test_wiki_hit_has_metadata(self, adapter: InMemoryMemPalaceAdapter, aleph: Aleph) -> None:
         """Wiki hits carry structured metadata."""
         _write_wiki_page(aleph, "postgres", "Postgres", "Relational database")
 
