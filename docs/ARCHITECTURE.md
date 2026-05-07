@@ -3,7 +3,7 @@
 > Status: **Design draft** · v0.0.x
 > Repo: <https://github.com/coxon/itsme>
 > Language: **Python**
-> Last updated: 2026-04-30
+> Last updated: 2026-05-07
 
 ---
 
@@ -30,12 +30,16 @@ MemPalace (海马体)              Aleph (新皮层)
 ─────────────────                ──────────────
 verbatim · 全量 · 短链            结构化 · 提炼 · 长链
 "发生了什么 / 原话是什么"          "我是谁 / 我学到了什么"
-原料                              成品
+原料 · 高召回搜索面                成品 · 高精度搜索面
 高频写、低频读                    低频写、高频读
 ```
 
-- **MemPalace** 是大脑：来什么记什么，verbatim + KG。
-- **Aleph** 是记忆管理员：定期把原料**抽取 / 结构化 / 去重 / 交叉链接 / 更新**，输出 wiki 风格的条目（参考 Andrej Karpathy 的 LLM Wiki / Gist 思路）。
+- **MemPalace** 是大脑：来什么记什么，verbatim + KG。**raw 全文是一等搜索面**。
+- **Aleph** 是记忆管理员：定期把原料**抽取 / 结构化 / 去重 / 交叉链接 / 更新**，输出 wiki 风格的条目。
+
+> **ask 搜索策略**：双引擎并行查询 → 合并去重 → 返回。Aleph 结构化层提供高精度命中；MemPalace raw 层提供高召回兜底。**LLM 提取遗漏时 MemPalace raw 兜底，永远不丢。**
+
+> **Aleph 渐进式落地**：v0.0.2 只做 per-turn extraction index（sqlite + FTS5，无 wiki / vault）；v0.0.3 升级到 wiki consolidation + promoter + vault。
 
 > 关键认知：**chat 是 I/O，wiki 才是 memory**。MemPalace 是日志，Aleph 才是记忆本身。
 
@@ -222,9 +226,10 @@ ask(q, promote=true) 时序
 | worker | 输入事件 | 输出 | 核心职责 |
 |---|---|---|---|
 | **router** | `raw.captured` | `memory.stored` | 决定写入哪个 wing/room，调 MemPalace |
-| **promoter** | `memory.stored`(批) / `wiki.promoted`(显式) | `wiki.promoted` | raw → 结构化 wiki，写 Aleph + Obsidian |
+| **intake** | `raw.captured` (hook) | `memory.stored` + `extraction.indexed` | structural strip → turn slice → LLM 提取 → 双写 MemPalace (raw) + Aleph index (structured)。v0.0.2 新增 |
+| **promoter** | `memory.stored`(批) / `wiki.promoted`(显式) | `wiki.promoted` | raw → 结构化 wiki，写 Aleph + Obsidian（v0.0.3） |
 | **curator** | 定时 / `memory.stored` | `memory.curated` | 去重、KG 失效（valid_from / ended） |
-| **reader** | `ask` 调用 | `memory.queried` | 路由查询、必要时 LLM 融合 |
+| **reader** | `ask` 调用 | `memory.queried` | 路由查询、双引擎合并、必要时 LLM 融合 |
 
 ### 6.1 router 路由策略
 
@@ -432,23 +437,33 @@ hook 触发（before-clear / before-exit / before-compact）
   收集即将丢失的 turn / context 内容
               │
               ▼
-events.append(raw.captured, source="hook:before-<x>")
+  ① Structural strip（regex 去 CC envelope / boilerplate）
               │
               ▼
-        router consumes
+  ② Turn slice（按 user/assistant turn 切成多条）
               │
               ▼
-    MemPalace.add_drawer(...)（批量）
+  per-turn events.append(raw.captured, source="hook:before-<x>")
               │
               ▼
-events.append(memory.stored)
+        intake worker consumes (async)
+              │
+              ├── ③ LLM intake (Haiku): 每 turn → keep/skip + {summary, entities, claims}
+              │
+              ├── ALL turns → MemPalace.add_drawer(raw_text)（全量入库，不筛）
+              │                 events.append(memory.stored)
+              │
+              ├── KEEP turns → Aleph.write_extraction(summary, entities, claims)
+              │                 events.append(extraction.indexed)
+              │
+              └── SKIP turns → events.append(raw.triaged, reason="low_info")（可观察性）
               │
               ▼
-（如果是 before-exit / before-compact）
+（如果是 before-exit / before-compact，v0.0.3+）
 events.append(consolidation.requested)
               │
               ▼
-        promoter consumes ──► Aleph.write
+        promoter consumes ──► Aleph.consolidate → wiki entry → vault（v0.0.3）
 ```
 
 **核心**：hook 是**抢救机制**，不是常规 logging。日常对话不进 hook，只有"上下文要被丢弃"时 hook 才出手。这样：
@@ -480,16 +495,24 @@ MemPalace.add_drawer(...)
 ### 8.4 Query flow（普通 ask）
 
 ```
-ask("X 是怎么决定的", mode=auto)
+ask("X 是怎么决定的", mode=auto)          ← v0.0.2 default
   │
   ▼
-reader
-  ├─► Aleph.search("X")     ──► hit  ──► 返回 wiki
-  └─► (miss) MemPalace.search ──► 返回 verbatim 拼接
+reader.dual_search()
+  ├─► Aleph.search("X")      ──► structured hits（summary/entity/claim 匹配，高精度）
+  └─► MemPalace.search("X")  ──► raw hits（全文/embedding 匹配，高召回）
+  │
+  ▼
+merge + dedup（同 turn_id 的结果合并，Aleph 命中排前）
   │
   ▼
 emit memory.queried
+  │
+  ▼
+return merged results
 ```
+
+> **双引擎保障**：Aleph 提供精准命中（entity "Postgres" 直接匹配）；MemPalace 提供兜底召回（LLM 未提取的 "西雅图出差" 仍在 raw 里命中）。永远不漏。
 
 ### 8.5 Query + promote flow
 
@@ -629,6 +652,11 @@ itsme/                            # git repo root
 | D8 | **Aleph 进程内模块**（非独立服务） | 部署简单、零跨进程开销 vs 与 itsme 强耦合 |
 | D9 | **Python 全栈** | 与 MemPalace 同语言、生态成熟 vs CC plugin TS 生态对接需 bridge |
 | D10 | **不做 per-turn hook**，只做 consolidation hook | 噪音低 vs 漏掉一些"想记没记"的瞬间（由 explicit remember 兜底） |
+| D11 | **ask 双引擎并行**（Aleph structured + MemPalace raw）→ 合并 | 高精度 + 高召回 vs 合并逻辑复杂 |
+| D12 | **Intake LLM (Haiku) 跑在 router async loop**，不在 hook 进程里 | 不阻塞 hook 超时 vs intake 有延迟 |
+| D13 | **explicit `remember()` 不走 intake**（直存 MemPalace） | fast-path 保持同步 vs explicit 写入没有结构化搜索面 |
+| D14 | **Aleph v0.0.2 = extraction index**（sqlite + FTS5），v0.0.3 升 wiki | 快速落地 + 渐进增强 vs 两步迁移成本 |
+| D15 | **MemPalace 全量存 raw**（包括 LLM 判断为 skip 的 turn） | 永远不丢 vs 搜索有噪音（Aleph 层过滤） |
 
 ---
 
