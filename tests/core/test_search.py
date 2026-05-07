@@ -67,14 +67,16 @@ def _write_aleph(
 class TestDualSearch:
     def test_aleph_only_hit(self, adapter, aleph) -> None:
         """Aleph has the answer but MemPalace doesn't match."""
-        _write_aleph(aleph, "User chose Postgres for concurrent writes",
-                     turn_id="d1",
-                     entities=[{"name": "Postgres", "type": "database"}],
-                     claims=["Postgres chosen for concurrent writes"])
+        _write_aleph(
+            aleph,
+            "User chose Postgres for concurrent writes",
+            turn_id="d1",
+            entities=[{"name": "Postgres", "type": "database"}],
+            claims=["Postgres chosen for concurrent writes"],
+        )
         _write_mp(adapter, "some unrelated content about cooking")
 
-        hits = dual_search("Postgres", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search("Postgres", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         assert len(hits) >= 1
         aleph_hits = [h for h in hits if h.kind == "extraction"]
@@ -84,12 +86,14 @@ class TestDualSearch:
     def test_mempalace_only_hit(self, adapter, aleph) -> None:
         """MemPalace has the answer but Aleph doesn't match."""
         _write_mp(adapter, "We decided to deploy on Monday morning")
-        _write_aleph(aleph, "User likes Python",
-                     turn_id="d1",
-                     entities=[{"name": "Python", "type": "language"}])
+        _write_aleph(
+            aleph,
+            "User likes Python",
+            turn_id="d1",
+            entities=[{"name": "Python", "type": "language"}],
+        )
 
-        hits = dual_search("deploy Monday", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search("deploy Monday", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         mp_hits = [h for h in hits if h.kind == "verbatim"]
         assert len(mp_hits) >= 1
@@ -98,13 +102,15 @@ class TestDualSearch:
     def test_both_engines_hit_different_turns(self, adapter, aleph) -> None:
         """Both engines return different turns — no dedup needed."""
         _write_mp(adapter, "We discussed database options last week")
-        _write_aleph(aleph, "Postgres selected for main DB",
-                     turn_id="d2",
-                     entities=[{"name": "Postgres", "type": "database"}],
-                     claims=["Postgres selected"])
+        _write_aleph(
+            aleph,
+            "Postgres selected for main DB",
+            turn_id="d2",
+            entities=[{"name": "Postgres", "type": "database"}],
+            claims=["Postgres selected"],
+        )
 
-        hits = dual_search("database", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search("database", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         kinds = {h.kind for h in hits}
         assert "extraction" in kinds or "verbatim" in kinds
@@ -113,13 +119,15 @@ class TestDualSearch:
     def test_dedup_same_drawer_id(self, adapter, aleph) -> None:
         """Same turn matched by both engines — only one hit per drawer_id."""
         drawer_id = _write_mp(adapter, "Use Postgres for the user service")
-        _write_aleph(aleph, "Postgres for user service",
-                     turn_id=drawer_id,
-                     entities=[{"name": "Postgres", "type": "database"}],
-                     claims=["Postgres for user service"])
+        _write_aleph(
+            aleph,
+            "Postgres for user service",
+            turn_id=drawer_id,
+            entities=[{"name": "Postgres", "type": "database"}],
+            claims=["Postgres for user service"],
+        )
 
-        hits = dual_search("Postgres", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search("Postgres", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         # Same drawer_id should NOT appear twice
         drawer_ids = [h.drawer_id for h in hits if h.drawer_id]
@@ -131,13 +139,15 @@ class TestDualSearch:
     def test_aleph_ranked_before_mempalace(self, adapter, aleph) -> None:
         """Aleph hits appear before MemPalace gap-fills."""
         _write_mp(adapter, "Redis is used for caching in production")
-        _write_aleph(aleph, "Redis deployed as cache layer",
-                     turn_id="d-aleph",
-                     entities=[{"name": "Redis", "type": "database"}],
-                     claims=["Redis used for caching"])
+        _write_aleph(
+            aleph,
+            "Redis deployed as cache layer",
+            turn_id="d-aleph",
+            entities=[{"name": "Redis", "type": "database"}],
+            claims=["Redis used for caching"],
+        )
 
-        hits = dual_search("Redis caching", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search("Redis caching", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         if len(hits) >= 2:
             # First hit should be extraction (Aleph)
@@ -147,8 +157,7 @@ class TestDualSearch:
         """When aleph=None, behaves like verbatim search."""
         _write_mp(adapter, "Important decision about deployment")
 
-        hits = dual_search("deployment", adapter=adapter, aleph=None,
-                           wing="wing_test", limit=5)
+        hits = dual_search("deployment", adapter=adapter, aleph=None, wing="wing_test", limit=5)
 
         assert len(hits) >= 1
         assert all(h.kind == "verbatim" for h in hits)
@@ -170,19 +179,16 @@ class TestEdgeCases:
         """Results never exceed limit."""
         for i in range(10):
             _write_mp(adapter, f"item {i} about testing")
-            _write_aleph(aleph, f"test item {i}",
-                         turn_id=f"d-{i}",
-                         claims=[f"test item {i}"])
+            _write_aleph(aleph, f"test item {i}", turn_id=f"d-{i}", claims=[f"test item {i}"])
 
-        hits = dual_search("test", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=3)
+        hits = dual_search("test", adapter=adapter, aleph=aleph, wing="wing_test", limit=3)
         assert len(hits) <= 3
 
     def test_no_results(self, adapter, aleph) -> None:
         """Query that matches nothing in either engine."""
-        hits = dual_search("xyzzy nonexistent term",
-                           adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search(
+            "xyzzy nonexistent term", adapter=adapter, aleph=aleph, wing="wing_test", limit=5
+        )
         assert hits == []
 
     def test_aleph_error_degrades_gracefully(self, adapter) -> None:
@@ -193,8 +199,9 @@ class TestEdgeCases:
             def search(self, query, *, limit=5):
                 raise RuntimeError("DB corrupted")
 
-        hits = dual_search("servers", adapter=adapter, aleph=BrokenAleph(),
-                           wing="wing_test", limit=5)
+        hits = dual_search(
+            "servers", adapter=adapter, aleph=BrokenAleph(), wing="wing_test", limit=5
+        )
 
         # Should still get MemPalace results
         assert len(hits) >= 1
@@ -236,10 +243,13 @@ class TestScoreNormalization:
 class TestSearchHitStructure:
     def test_aleph_hit_has_metadata(self, adapter, aleph) -> None:
         """Aleph hits carry entities/claims in metadata."""
-        _write_aleph(aleph, "Postgres for user service",
-                     turn_id="d1",
-                     entities=[{"name": "Postgres", "type": "database"}],
-                     claims=["Postgres chosen"])
+        _write_aleph(
+            aleph,
+            "Postgres for user service",
+            turn_id="d1",
+            entities=[{"name": "Postgres", "type": "database"}],
+            claims=["Postgres chosen"],
+        )
 
         hits = dual_search("Postgres", adapter=adapter, aleph=aleph, limit=5)
         aleph_hits = [h for h in hits if h.kind == "extraction"]
@@ -262,12 +272,9 @@ class TestSearchHitStructure:
     def test_ref_format(self, adapter, aleph) -> None:
         """Refs follow the expected format."""
         _write_mp(adapter, "Ref format test content")
-        _write_aleph(aleph, "Ref format extraction",
-                     turn_id="d-ref",
-                     claims=["ref test"])
+        _write_aleph(aleph, "Ref format extraction", turn_id="d-ref", claims=["ref test"])
 
-        hits = dual_search("ref format", adapter=adapter, aleph=aleph,
-                           wing="wing_test", limit=5)
+        hits = dual_search("ref format", adapter=adapter, aleph=aleph, wing="wing_test", limit=5)
 
         for h in hits:
             if h.kind == "extraction":

@@ -41,27 +41,37 @@ class TestWrite:
     def test_count_increments(self, index: ExtractionIndex) -> None:
         assert index.count() == 0
         index.write(
-            turn_id="d1", raw_event_id="e1",
-            summary="s1", entities=[], claims=[],
+            turn_id="d1",
+            raw_event_id="e1",
+            summary="s1",
+            entities=[],
+            claims=[],
         )
         assert index.count() == 1
         index.write(
-            turn_id="d2", raw_event_id="e2",
-            summary="s2", entities=[], claims=[],
+            turn_id="d2",
+            raw_event_id="e2",
+            summary="s2",
+            entities=[],
+            claims=[],
         )
         assert index.count() == 2
 
     def test_empty_entities_and_claims(self, index: ExtractionIndex) -> None:
         ext = index.write(
-            turn_id="d1", raw_event_id="e1",
-            summary="Just a note", entities=[], claims=[],
+            turn_id="d1",
+            raw_event_id="e1",
+            summary="Just a note",
+            entities=[],
+            claims=[],
         )
         assert ext.entities == []
         assert ext.claims == []
 
     def test_cjk_content(self, index: ExtractionIndex) -> None:
         ext = index.write(
-            turn_id="d1", raw_event_id="e1",
+            turn_id="d1",
+            raw_event_id="e1",
             summary="用户决定使用 Postgres",
             entities=[{"name": "数据库", "type": "concept"}],
             claims=["Postgres 被选择因为并发写支持"],
@@ -76,7 +86,8 @@ class TestWrite:
 class TestSearch:
     def _seed(self, index: ExtractionIndex) -> None:
         index.write(
-            turn_id="d1", raw_event_id="e1",
+            turn_id="d1",
+            raw_event_id="e1",
             summary="Decided to use Postgres for the worker pool database",
             entities=[
                 {"name": "Postgres", "type": "database"},
@@ -85,7 +96,8 @@ class TestSearch:
             claims=["Postgres chosen for concurrent writes"],
         )
         index.write(
-            turn_id="d2", raw_event_id="e2",
+            turn_id="d2",
+            raw_event_id="e2",
             summary="Apollo defense tech company Warfighter OS drones",
             entities=[
                 {"name": "Apollo", "type": "company"},
@@ -94,7 +106,8 @@ class TestSearch:
             claims=["Apollo builds drone operating system for disconnected battlefields"],
         )
         index.write(
-            turn_id="d3", raw_event_id="e3",
+            turn_id="d3",
+            raw_event_id="e3",
             summary="Had dinner with 老王 who mentioned DuckDB for OLAP",
             entities=[
                 {"name": "老王", "type": "person"},
@@ -166,8 +179,11 @@ class TestPersistence:
         db = tmp_path / "aleph.db"
         idx1 = ExtractionIndex(db)
         idx1.write(
-            turn_id="d1", raw_event_id="e1",
-            summary="Postgres decision", entities=[], claims=[],
+            turn_id="d1",
+            raw_event_id="e1",
+            summary="Postgres decision",
+            entities=[],
+            claims=[],
         )
         idx1.close()
 

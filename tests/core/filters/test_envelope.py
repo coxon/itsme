@@ -60,7 +60,7 @@ class TestMultipleEnvelopes:
             "<local-command-caveat>caveat</local-command-caveat>\n"
             "<command-name>exit</command-name>\n"
             "<command-message>msg</command-message>\n"
-            "<command-args>{\"key\": \"val\"}</command-args>\n"
+            '<command-args>{"key": "val"}</command-args>\n'
             "<local-command-stdout>out</local-command-stdout>\n"
             "real content 2"
         )
@@ -68,11 +68,7 @@ class TestMultipleEnvelopes:
         assert result == "real content 1\n\nreal content 2"
 
     def test_repeated_same_tag(self) -> None:
-        text = (
-            "<command-name>exit</command-name>"
-            " middle "
-            "<command-name>clear</command-name>"
-        )
+        text = "<command-name>exit</command-name>" " middle " "<command-name>clear</command-name>"
         result = strip_envelopes(text)
         assert result == "middle"
 

@@ -87,8 +87,7 @@ class TestDeepSeekProvider:
 
         fake_response = httpx.Response(401, text="Unauthorized")
         provider = DeepSeekProvider(api_key="sk-bad", model="m")
-        with patch("httpx.post", return_value=fake_response), \
-             pytest.raises(LLMError, match="auth"):
+        with patch("httpx.post", return_value=fake_response), pytest.raises(LLMError, match="auth"):
             provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
 
     def test_rate_limit_raises_unavailable(self) -> None:
@@ -96,8 +95,10 @@ class TestDeepSeekProvider:
 
         fake_response = httpx.Response(429, text="Too Many Requests")
         provider = DeepSeekProvider(api_key="sk-ok", model="m")
-        with patch("httpx.post", return_value=fake_response), \
-             pytest.raises(LLMUnavailableError, match="rate limited"):
+        with (
+            patch("httpx.post", return_value=fake_response),
+            pytest.raises(LLMUnavailableError, match="rate limited"),
+        ):
             provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
 
     def test_server_error_raises_unavailable(self) -> None:
@@ -105,24 +106,30 @@ class TestDeepSeekProvider:
 
         fake_response = httpx.Response(500, text="Internal Server Error")
         provider = DeepSeekProvider(api_key="sk-ok", model="m")
-        with patch("httpx.post", return_value=fake_response), \
-             pytest.raises(LLMUnavailableError, match="server error"):
+        with (
+            patch("httpx.post", return_value=fake_response),
+            pytest.raises(LLMUnavailableError, match="server error"),
+        ):
             provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
 
     def test_connection_error_raises_unavailable(self) -> None:
         import httpx
 
         provider = DeepSeekProvider(api_key="sk-ok", model="m")
-        with patch("httpx.post", side_effect=httpx.ConnectError("refused")), \
-             pytest.raises(LLMUnavailableError, match="connection"):
+        with (
+            patch("httpx.post", side_effect=httpx.ConnectError("refused")),
+            pytest.raises(LLMUnavailableError, match="connection"),
+        ):
             provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
 
     def test_timeout_raises_unavailable(self) -> None:
         import httpx
 
         provider = DeepSeekProvider(api_key="sk-ok", model="m")
-        with patch("httpx.post", side_effect=httpx.ReadTimeout("timed out")), \
-             pytest.raises(LLMUnavailableError, match="timed out"):
+        with (
+            patch("httpx.post", side_effect=httpx.ReadTimeout("timed out")),
+            pytest.raises(LLMUnavailableError, match="timed out"),
+        ):
             provider.complete(system="", messages=[{"role": "user", "content": "hi"}])
 
     def test_empty_choices_returns_empty(self) -> None:

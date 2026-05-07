@@ -142,8 +142,13 @@ class IntakeProcessor:
         """
         if self._degraded:
             return [
-                {"verdict": "skip", "skip_reason": "llm_unavailable",
-                 "summary": "", "entities": [], "claims": []}
+                {
+                    "verdict": "skip",
+                    "skip_reason": "llm_unavailable",
+                    "summary": "",
+                    "entities": [],
+                    "claims": [],
+                }
                 for _ in events
             ]
 
@@ -165,21 +170,29 @@ class IntakeProcessor:
         except LLMUnavailableError as exc:
             _logger.warning("itsme intake: LLM unavailable, degrading: %s", exc)
             return [
-                {"verdict": "skip", "skip_reason": "llm_unavailable",
-                 "summary": "", "entities": [], "claims": []}
+                {
+                    "verdict": "skip",
+                    "skip_reason": "llm_unavailable",
+                    "summary": "",
+                    "entities": [],
+                    "claims": [],
+                }
                 for _ in events
             ]
         except Exception as exc:
             _logger.error("itsme intake: LLM extraction failed: %s", exc)
             return [
-                {"verdict": "skip", "skip_reason": f"llm_error: {exc}",
-                 "summary": "", "entities": [], "claims": []}
+                {
+                    "verdict": "skip",
+                    "skip_reason": f"llm_error: {exc}",
+                    "summary": "",
+                    "entities": [],
+                    "claims": [],
+                }
                 for _ in events
             ]
 
-    def _write_and_emit(
-        self, event: EventEnvelope, extraction: dict[str, Any]
-    ) -> IntakeResult:
+    def _write_and_emit(self, event: EventEnvelope, extraction: dict[str, Any]) -> IntakeResult:
         """Write to MemPalace (always) + Aleph (if keep) + emit triaged."""
         content = event.payload.get("content", "")
         turn_role = event.payload.get("turn_role", "unknown")
@@ -195,7 +208,9 @@ class IntakeProcessor:
         # Always write raw to MemPalace
         try:
             write_res = self._adapter.write(
-                content=content, wing=self._wing, room=room,
+                content=content,
+                wing=self._wing,
+                room=room,
             )
             drawer_id = write_res.drawer_id
         except Exception as exc:
@@ -372,35 +387,61 @@ def _parse_intake_response(raw: str, *, expected_count: int) -> list[dict[str, A
     except json.JSONDecodeError:
         _logger.warning("itsme intake: LLM returned non-JSON, degrading all turns")
         return [
-            {"verdict": "skip", "skip_reason": "llm_parse_error",
-             "summary": "", "entities": [], "claims": []}
+            {
+                "verdict": "skip",
+                "skip_reason": "llm_parse_error",
+                "summary": "",
+                "entities": [],
+                "claims": [],
+            }
         ] * expected_count
 
     if not isinstance(data, list):
         _logger.warning("itsme intake: LLM returned non-array JSON, degrading")
         return [
-            {"verdict": "skip", "skip_reason": "llm_parse_error",
-             "summary": "", "entities": [], "claims": []}
+            {
+                "verdict": "skip",
+                "skip_reason": "llm_parse_error",
+                "summary": "",
+                "entities": [],
+                "claims": [],
+            }
         ] * expected_count
 
     # Normalize each entry
     result: list[dict[str, Any]] = []
     for item in data[:expected_count]:
         if not isinstance(item, dict):
-            result.append({"verdict": "skip", "skip_reason": "malformed_entry",
-                          "summary": "", "entities": [], "claims": []})
+            result.append(
+                {
+                    "verdict": "skip",
+                    "skip_reason": "malformed_entry",
+                    "summary": "",
+                    "entities": [],
+                    "claims": [],
+                }
+            )
             continue
-        result.append({
-            "verdict": item.get("verdict", "skip"),
-            "summary": item.get("summary", ""),
-            "entities": item.get("entities", []),
-            "claims": item.get("claims", []),
-            "skip_reason": item.get("skip_reason", ""),
-        })
+        result.append(
+            {
+                "verdict": item.get("verdict", "skip"),
+                "summary": item.get("summary", ""),
+                "entities": item.get("entities", []),
+                "claims": item.get("claims", []),
+                "skip_reason": item.get("skip_reason", ""),
+            }
+        )
 
     # Pad if LLM returned fewer than expected
     while len(result) < expected_count:
-        result.append({"verdict": "skip", "skip_reason": "llm_truncated",
-                      "summary": "", "entities": [], "claims": []})
+        result.append(
+            {
+                "verdict": "skip",
+                "skip_reason": "llm_truncated",
+                "summary": "",
+                "entities": [],
+                "claims": [],
+            }
+        )
 
     return result

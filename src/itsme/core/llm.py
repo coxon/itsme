@@ -106,8 +106,7 @@ class DeepSeekProvider:
     ) -> None:
         self._model = model or os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
         self._base_url = (
-            base_url
-            or os.environ.get("ITSME_LLM_BASE_URL", DEFAULT_BASE_URL)
+            base_url or os.environ.get("ITSME_LLM_BASE_URL", DEFAULT_BASE_URL)
         ).rstrip("/")
         self._max_tokens = max_tokens
 

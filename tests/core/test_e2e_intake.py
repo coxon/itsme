@@ -84,46 +84,62 @@ class TestT223EndToEnd:
     def test_full_pipeline(self, bus, adapter, aleph) -> None:
         """User conversation → hook capture → intake → dual search finds it."""
         # LLM stub returns structured extractions
-        llm = StubProvider(response=json.dumps([
-            {
-                "verdict": "keep",
-                "summary": "User decided to use Postgres for the user service database",
-                "entities": [
-                    {"name": "Postgres", "type": "database"},
-                    {"name": "user service", "type": "project"},
-                ],
-                "claims": [
-                    "Postgres chosen for user service database",
-                    "Concurrent writes requirement drove the decision",
-                ],
-            },
-            {
-                "verdict": "keep",
-                "summary": "Assistant confirmed Postgres supports concurrent writes well",
-                "entities": [{"name": "Postgres", "type": "database"}],
-                "claims": ["Postgres handles concurrent writes effectively"],
-            },
-        ]))
+        llm = StubProvider(
+            response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "User decided to use Postgres for the user service database",
+                        "entities": [
+                            {"name": "Postgres", "type": "database"},
+                            {"name": "user service", "type": "project"},
+                        ],
+                        "claims": [
+                            "Postgres chosen for user service database",
+                            "Concurrent writes requirement drove the decision",
+                        ],
+                    },
+                    {
+                        "verdict": "keep",
+                        "summary": "Assistant confirmed Postgres supports concurrent writes well",
+                        "entities": [{"name": "Postgres", "type": "database"}],
+                        "claims": ["Postgres handles concurrent writes effectively"],
+                    },
+                ]
+            )
+        )
 
         # Step 1: Simulate hook capture (per-turn events)
-        events = _emit_hook_turns(bus, [
-            ("user", "I decided to use Postgres for the user service because of concurrent writes"),
-            ("assistant", "Great choice! Postgres handles concurrent writes very well with MVCC"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                (
+                    "user",
+                    "I decided to use Postgres for the user service because of concurrent writes",
+                ),
+                (
+                    "assistant",
+                    "Great choice! Postgres handles concurrent writes very well with MVCC",
+                ),
+            ],
+        )
 
         # Step 2: Run intake processor
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         results = processor.process_batch(events)
 
         # Step 3: Verify dual writes
         assert len(results) == 2
         assert all(r.verdict == "keep" for r in results)
-        assert all(r.drawer_id for r in results)      # MemPalace written
-        assert all(r.extraction_id for r in results)   # Aleph written
-        assert aleph.count() == 2                       # 2 extractions
+        assert all(r.drawer_id for r in results)  # MemPalace written
+        assert all(r.extraction_id for r in results)  # Aleph written
+        assert aleph.count() == 2  # 2 extractions
 
         # Step 4: ask(mode=auto) finds it through Aleph
         memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
@@ -135,34 +151,44 @@ class TestT223EndToEnd:
 
     def test_pipeline_with_skip_turns(self, bus, adapter, aleph) -> None:
         """Skipped turns still end up in MemPalace for recall."""
-        llm = StubProvider(response=json.dumps([
-            {
-                "verdict": "keep",
-                "summary": "Planning deployment to AWS us-east-1",
-                "entities": [
-                    {"name": "AWS", "type": "company"},
-                    {"name": "us-east-1", "type": "place"},
-                ],
-                "claims": ["Deploy to AWS us-east-1"],
-            },
-            {"verdict": "skip", "skip_reason": "procedural acknowledgment"},
-            {
-                "verdict": "keep",
-                "summary": "Timeline set for next Friday",
-                "entities": [],
-                "claims": ["Deployment scheduled for next Friday"],
-            },
-        ]))
+        llm = StubProvider(
+            response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "Planning deployment to AWS us-east-1",
+                        "entities": [
+                            {"name": "AWS", "type": "company"},
+                            {"name": "us-east-1", "type": "place"},
+                        ],
+                        "claims": ["Deploy to AWS us-east-1"],
+                    },
+                    {"verdict": "skip", "skip_reason": "procedural acknowledgment"},
+                    {
+                        "verdict": "keep",
+                        "summary": "Timeline set for next Friday",
+                        "entities": [],
+                        "claims": ["Deployment scheduled for next Friday"],
+                    },
+                ]
+            )
+        )
 
-        events = _emit_hook_turns(bus, [
-            ("user", "Let's deploy to AWS us-east-1 region"),
-            ("assistant", "OK, I'll set that up"),
-            ("user", "Target is next Friday"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                ("user", "Let's deploy to AWS us-east-1 region"),
+                ("assistant", "OK, I'll set that up"),
+                ("user", "Target is next Friday"),
+            ],
+        )
 
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         results = processor.process_batch(events)
 
@@ -193,26 +219,39 @@ class TestT224AlephMissRegression:
     def test_missed_entity_found_via_mempalace(self, bus, adapter, aleph) -> None:
         """Entity mentioned in passing (not extracted by LLM) still searchable."""
         # LLM extracts the main entity but misses "Portland" (secondary mention)
-        llm = StubProvider(response=json.dumps([
-            {
-                "verdict": "keep",
-                "summary": "Meeting with the DevOps team about Kubernetes migration",
-                "entities": [
-                    {"name": "DevOps team", "type": "company"},
-                    {"name": "Kubernetes", "type": "tool"},
-                ],
-                "claims": ["Kubernetes migration planned"],
-                # NOTE: "Portland" is NOT extracted — LLM missed it
-            },
-        ]))
+        llm = StubProvider(
+            response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "Meeting with the DevOps team about Kubernetes migration",
+                        "entities": [
+                            {"name": "DevOps team", "type": "company"},
+                            {"name": "Kubernetes", "type": "tool"},
+                        ],
+                        "claims": ["Kubernetes migration planned"],
+                        # NOTE: "Portland" is NOT extracted — LLM missed it
+                    },
+                ]
+            )
+        )
 
-        events = _emit_hook_turns(bus, [
-            ("user", "Had a meeting with the DevOps team in Portland about Kubernetes migration"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                (
+                    "user",
+                    "Had a meeting with the DevOps team in Portland about Kubernetes migration",
+                ),
+            ],
+        )
 
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         processor.process_batch(events)
 
@@ -231,18 +270,28 @@ class TestT224AlephMissRegression:
 
     def test_completely_missed_turn_found_via_mempalace(self, bus, adapter, aleph) -> None:
         """Turn where LLM says 'skip' is still findable in MemPalace."""
-        llm = StubProvider(response=json.dumps([
-            {"verdict": "skip", "skip_reason": "seems procedural"},
-        ]))
+        llm = StubProvider(
+            response=json.dumps(
+                [
+                    {"verdict": "skip", "skip_reason": "seems procedural"},
+                ]
+            )
+        )
 
         # The turn actually contains a real decision, but LLM misjudged
-        events = _emit_hook_turns(bus, [
-            ("user", "Actually let's switch from MySQL to SQLite for the test suite"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                ("user", "Actually let's switch from MySQL to SQLite for the test suite"),
+            ],
+        )
 
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         processor.process_batch(events)
 
@@ -268,15 +317,20 @@ class TestT225LLMDegradation:
     def test_degraded_intake_writes_to_mempalace(self, bus, adapter, aleph) -> None:
         """With bare StubProvider (no response = degraded), MP writes succeed."""
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
             llm=StubProvider(),  # bare = degraded mode
             wing="wing_test",
         )
 
-        events = _emit_hook_turns(bus, [
-            ("user", "Important decision about architecture"),
-            ("assistant", "I recommend using microservices"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                ("user", "Important decision about architecture"),
+                ("assistant", "I recommend using microservices"),
+            ],
+        )
         results = processor.process_batch(events)
 
         # All turns written to MemPalace
@@ -340,19 +394,34 @@ class TestT226StatusFeed:
     """MEMORY_ROUTED events carry verdict (skip/keep) for observability."""
 
     def test_status_shows_routed_events_with_verdict(self, bus, adapter, aleph) -> None:
-        llm = StubProvider(response=json.dumps([
-            {"verdict": "keep", "summary": "Test decision", "entities": [], "claims": ["test"]},
-            {"verdict": "skip", "skip_reason": "acknowledgment"},
-        ]))
+        llm = StubProvider(
+            response=json.dumps(
+                [
+                    {
+                        "verdict": "keep",
+                        "summary": "Test decision",
+                        "entities": [],
+                        "claims": ["test"],
+                    },
+                    {"verdict": "skip", "skip_reason": "acknowledgment"},
+                ]
+            )
+        )
 
-        events = _emit_hook_turns(bus, [
-            ("user", "Important test decision"),
-            ("assistant", "Got it"),
-        ])
+        events = _emit_hook_turns(
+            bus,
+            [
+                ("user", "Important test decision"),
+                ("assistant", "Got it"),
+            ],
+        )
 
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         processor.process_batch(events)
 
@@ -367,15 +436,22 @@ class TestT226StatusFeed:
 
     def test_status_shows_memory_stored_events(self, bus, adapter, aleph) -> None:
         """MEMORY_STORED events from intake are visible in status."""
-        llm = StubProvider(response=json.dumps([
-            {"verdict": "keep", "summary": "Stored test", "entities": [], "claims": []},
-        ]))
+        llm = StubProvider(
+            response=json.dumps(
+                [
+                    {"verdict": "keep", "summary": "Stored test", "entities": [], "claims": []},
+                ]
+            )
+        )
 
         events = _emit_hook_turns(bus, [("user", "stored test content")])
 
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         processor.process_batch(events)
 

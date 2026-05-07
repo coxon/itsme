@@ -165,8 +165,14 @@ class ExtractionIndex:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    extraction_id, turn_id, raw_event_id, summary,
-                    entities_json, claims_json, source, ts,
+                    extraction_id,
+                    turn_id,
+                    raw_event_id,
+                    summary,
+                    entities_json,
+                    claims_json,
+                    source,
+                    ts,
                 ),
             )
             self._conn.commit()

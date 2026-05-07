@@ -55,9 +55,7 @@ def ask_handler(
             "only 'verbatim' and 'auto' are available"
         )
     else:
-        raise ValueError(
-            f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}"
-        )
+        raise ValueError(f"mode must be one of 'verbatim' / 'auto' / 'wiki' / 'now'; got {mode!r}")
 
     # bool is a subclass of int in Python — reject it explicitly so
     # ``limit=True`` doesn't silently mean "1 hit".

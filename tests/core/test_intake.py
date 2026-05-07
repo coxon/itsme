@@ -61,13 +61,19 @@ def _make_raw_events(bus: EventBus, turns: list[tuple[str, str]]) -> list:
 class TestDegradedMode:
     def test_writes_all_turns_to_mempalace(self, bus, adapter, aleph) -> None:
         """Even without LLM, all turns go to MemPalace."""
-        events = _make_raw_events(bus, [
-            ("user", "I decided to use Postgres"),
-            ("assistant", "Good choice for concurrent writes"),
-        ])
+        events = _make_raw_events(
+            bus,
+            [
+                ("user", "I decided to use Postgres"),
+                ("assistant", "Good choice for concurrent writes"),
+            ],
+        )
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=StubProvider(), wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=StubProvider(),
+            wing="wing_test",
         )
         results = processor.process_batch(events)
 
@@ -80,8 +86,11 @@ class TestDegradedMode:
     def test_no_aleph_entries_in_degraded(self, bus, adapter, aleph) -> None:
         events = _make_raw_events(bus, [("user", "test content")])
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=StubProvider(), wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=StubProvider(),
+            wing="wing_test",
         )
         processor.process_batch(events)
         assert aleph.count() == 0
@@ -95,18 +104,23 @@ class TestWithLLM:
         return StubProvider(response=json.dumps(extractions))
 
     def test_keep_turn_writes_mempalace_and_aleph(self, bus, adapter, aleph) -> None:
-        llm = self._llm_response([
-            {
-                "verdict": "keep",
-                "summary": "User chose Postgres for concurrent writes",
-                "entities": [{"name": "Postgres", "type": "database"}],
-                "claims": ["Postgres chosen for concurrent writes"],
-            },
-        ])
+        llm = self._llm_response(
+            [
+                {
+                    "verdict": "keep",
+                    "summary": "User chose Postgres for concurrent writes",
+                    "entities": [{"name": "Postgres", "type": "database"}],
+                    "claims": ["Postgres chosen for concurrent writes"],
+                },
+            ]
+        )
         events = _make_raw_events(bus, [("user", "I decided to use Postgres")])
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         results = processor.process_batch(events)
 
@@ -125,13 +139,18 @@ class TestWithLLM:
         assert len(hits) >= 1
 
     def test_skip_turn_writes_mempalace_only(self, bus, adapter, aleph) -> None:
-        llm = self._llm_response([
-            {"verdict": "skip", "skip_reason": "procedural acknowledgment"},
-        ])
+        llm = self._llm_response(
+            [
+                {"verdict": "skip", "skip_reason": "procedural acknowledgment"},
+            ]
+        )
         events = _make_raw_events(bus, [("assistant", "OK, let me check that.")])
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         results = processor.process_batch(events)
 
@@ -141,29 +160,37 @@ class TestWithLLM:
         assert aleph.count() == 0
 
     def test_mixed_batch(self, bus, adapter, aleph) -> None:
-        llm = self._llm_response([
-            {
-                "verdict": "keep",
-                "summary": "Decided on Postgres",
-                "entities": [{"name": "Postgres", "type": "database"}],
-                "claims": ["Chose Postgres"],
-            },
-            {"verdict": "skip", "skip_reason": "acknowledgment"},
-            {
-                "verdict": "keep",
-                "summary": "Planning Seattle trip",
-                "entities": [{"name": "Seattle", "type": "place"}],
-                "claims": ["Trip to Seattle next month"],
-            },
-        ])
-        events = _make_raw_events(bus, [
-            ("user", "Let's use Postgres"),
-            ("assistant", "OK"),
-            ("user", "Also I'm going to Seattle next month"),
-        ])
+        llm = self._llm_response(
+            [
+                {
+                    "verdict": "keep",
+                    "summary": "Decided on Postgres",
+                    "entities": [{"name": "Postgres", "type": "database"}],
+                    "claims": ["Chose Postgres"],
+                },
+                {"verdict": "skip", "skip_reason": "acknowledgment"},
+                {
+                    "verdict": "keep",
+                    "summary": "Planning Seattle trip",
+                    "entities": [{"name": "Seattle", "type": "place"}],
+                    "claims": ["Trip to Seattle next month"],
+                },
+            ]
+        )
+        events = _make_raw_events(
+            bus,
+            [
+                ("user", "Let's use Postgres"),
+                ("assistant", "OK"),
+                ("user", "Also I'm going to Seattle next month"),
+            ],
+        )
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         results = processor.process_batch(events)
 
@@ -177,13 +204,18 @@ class TestWithLLM:
         assert aleph.count() == 2
 
     def test_emits_memory_stored_events(self, bus, adapter, aleph) -> None:
-        llm = self._llm_response([
-            {"verdict": "keep", "summary": "Test", "entities": [], "claims": []},
-        ])
+        llm = self._llm_response(
+            [
+                {"verdict": "keep", "summary": "Test", "entities": [], "claims": []},
+            ]
+        )
         events = _make_raw_events(bus, [("user", "test")])
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         processor.process_batch(events)
 
@@ -192,13 +224,18 @@ class TestWithLLM:
         assert stored[0].source == "worker:intake"
 
     def test_emits_routed_events_with_verdict(self, bus, adapter, aleph) -> None:
-        llm = self._llm_response([
-            {"verdict": "keep", "summary": "Test", "entities": [], "claims": []},
-        ])
+        llm = self._llm_response(
+            [
+                {"verdict": "keep", "summary": "Test", "entities": [], "claims": []},
+            ]
+        )
         events = _make_raw_events(bus, [("user", "test")])
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=llm, wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=llm,
+            wing="wing_test",
         )
         processor.process_batch(events)
 
@@ -208,8 +245,11 @@ class TestWithLLM:
 
     def test_empty_batch(self, bus, adapter, aleph) -> None:
         processor = IntakeProcessor(
-            bus=bus, adapter=adapter, aleph=aleph,
-            llm=StubProvider(), wing="wing_test",
+            bus=bus,
+            adapter=adapter,
+            aleph=aleph,
+            llm=StubProvider(),
+            wing="wing_test",
         )
         assert processor.process_batch([]) == []
 
@@ -219,10 +259,12 @@ class TestWithLLM:
 
 class TestParseIntakeResponse:
     def test_valid_json_array(self) -> None:
-        raw = json.dumps([
-            {"verdict": "keep", "summary": "X", "entities": [], "claims": []},
-            {"verdict": "skip", "skip_reason": "low info"},
-        ])
+        raw = json.dumps(
+            [
+                {"verdict": "keep", "summary": "X", "entities": [], "claims": []},
+                {"verdict": "skip", "skip_reason": "low info"},
+            ]
+        )
         result = _parse_intake_response(raw, expected_count=2)
         assert len(result) == 2
         assert result[0]["verdict"] == "keep"
@@ -242,9 +284,13 @@ class TestParseIntakeResponse:
         assert result[1]["skip_reason"] == "llm_truncated"
 
     def test_extra_entries_truncated(self) -> None:
-        raw = json.dumps([
-            {"verdict": "keep"}, {"verdict": "skip"}, {"verdict": "keep"},
-        ])
+        raw = json.dumps(
+            [
+                {"verdict": "keep"},
+                {"verdict": "skip"},
+                {"verdict": "keep"},
+            ]
+        )
         result = _parse_intake_response(raw, expected_count=2)
         assert len(result) == 2
 

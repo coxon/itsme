@@ -320,7 +320,9 @@ class Memory:
     ) -> AskResult:
         """MemPalace-only search (v0.0.1 behavior)."""
         hits: list[MemPalaceHit] = self._adapter.search(
-            question, limit=limit, wing=wing_filter,
+            question,
+            limit=limit,
+            wing=wing_filter,
         )
 
         evt = self._bus.emit(

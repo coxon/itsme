@@ -27,7 +27,7 @@ def _make_transcript(path: Path, messages: list[str], *, roles: list[str] | None
     """Write a CC-shaped JSONL transcript."""
     with path.open("w", encoding="utf-8") as f:
         for i, m in enumerate(messages):
-            role = (roles[i] if roles else "user")
+            role = roles[i] if roles else "user"
             f.write(json.dumps({"type": role, "message": {"content": m}}) + "\n")
 
 

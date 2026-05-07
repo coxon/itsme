@@ -127,32 +127,36 @@ def dual_search(
             content_parts.append("Claims: " + "; ".join(hit.extraction.claims))
         content = "\n".join(p for p in content_parts if p)
 
-        results.append(SearchHit(
-            kind="extraction",
-            ref=f"aleph:{hit.extraction.id}",
-            content=content,
-            score=_normalize_fts5_rank(hit.rank),
-            drawer_id=drawer_id,
-            extraction_id=hit.extraction.id,
-            metadata={
-                "summary": hit.extraction.summary,
-                "entities": hit.extraction.entities,
-                "claims": hit.extraction.claims,
-            },
-        ))
+        results.append(
+            SearchHit(
+                kind="extraction",
+                ref=f"aleph:{hit.extraction.id}",
+                content=content,
+                score=_normalize_fts5_rank(hit.rank),
+                drawer_id=drawer_id,
+                extraction_id=hit.extraction.id,
+                metadata={
+                    "summary": hit.extraction.summary,
+                    "entities": hit.extraction.entities,
+                    "claims": hit.extraction.claims,
+                },
+            )
+        )
 
     # MemPalace gap-fills (high recall — turns Aleph missed)
     for hit in mp_hits:
         if hit.drawer_id in seen_drawer_ids:
             continue  # already covered by Aleph
         seen_drawer_ids.add(hit.drawer_id)
-        results.append(SearchHit(
-            kind="verbatim",
-            ref=f"mempalace:{hit.drawer_id}",
-            content=hit.content,
-            score=hit.score,
-            drawer_id=hit.drawer_id,
-        ))
+        results.append(
+            SearchHit(
+                kind="verbatim",
+                ref=f"mempalace:{hit.drawer_id}",
+                content=hit.content,
+                score=hit.score,
+                drawer_id=hit.drawer_id,
+            )
+        )
 
     return results[:limit]
 

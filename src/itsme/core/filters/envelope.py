@@ -51,9 +51,7 @@ _ENVELOPE_TAGS: Final[tuple[str, ...]] = (
 # matches each block independently rather than swallowing everything
 # between the first open and last close tag.
 _ENVELOPE_RE: Final[re.Pattern[str]] = re.compile(
-    r"<(" + "|".join(re.escape(t) for t in _ENVELOPE_TAGS) + r")>"
-    r".*?"
-    r"</\1>",
+    r"<(" + "|".join(re.escape(t) for t in _ENVELOPE_TAGS) + r")>" r".*?" r"</\1>",
     re.DOTALL,
 )
 
