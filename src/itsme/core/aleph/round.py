@@ -318,8 +318,8 @@ def _parse_round_response(raw: str) -> list[dict[str, Any]]:
         is_valid_create = action == "create" and all(
             isinstance(item.get(k), str) and bool(item[k].strip()) for k in required_create
         )
-        is_valid_update = action == "update" and isinstance(item.get("slug"), str) and bool(
-            item["slug"].strip()
+        is_valid_update = (
+            action == "update" and isinstance(item.get("slug"), str) and bool(item["slug"].strip())
         )
 
         # Optional list fields must be lists if present

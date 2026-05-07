@@ -1,31 +1,31 @@
-"""Dual-engine search — T2.19.
+"""Dual-engine search — T2.19 + vault wiki search.
 
-Parallel search over Aleph (structured, high precision) and MemPalace
-(raw, high recall). Results are merged and deduplicated by drawer_id
-so the same turn never appears twice.
+Parallel search over Aleph (structured, high precision), MemPalace
+(raw, high recall), and optionally the Obsidian vault (wiki pages).
+Results are merged and deduplicated.
 
 Design (ARCHITECTURE §8.4):
 
-    ┌────────────┐   ┌─────────────┐
-    │   Aleph     │   │  MemPalace  │
-    │ FTS5 index  │   │   search    │
-    └─────┬──────┘   └──────┬──────┘
-          │                 │
-          └───────┬─────────┘
-                  ▼
-          merge + dedup
-          (same drawer_id)
-                  │
-          ┌───────▼──────┐
-          │ AskSource[]  │
-          └──────────────┘
+    ┌────────────┐   ┌─────────────┐   ┌──────────────┐
+    │   Aleph     │   │  MemPalace  │   │  Vault Wiki  │
+    │ FTS5 index  │   │   search    │   │  page search │
+    └─────┬──────┘   └──────┬──────┘   └──────┬───────┘
+          │                 │                  │
+          └────────┬────────┴──────────────────┘
+                   ▼
+           merge + dedup
+                   │
+           ┌───────▼──────┐
+           │ SearchHit[]  │
+           └──────────────┘
 
 Merge rules:
 
-1. Aleph hits first (high precision — LLM-extracted summaries).
-2. MemPalace gap-fills (high recall — raw text for turns Aleph
+1. Vault wiki hits first (consolidated knowledge — LLM-curated pages).
+2. Aleph extraction hits next (high precision — per-turn summaries).
+3. MemPalace gap-fills (high recall — raw text for turns Aleph
    didn't extract or whose entities didn't match the FTS query).
-3. Dedup: if both engines hit the same ``drawer_id`` / ``turn_id``,
+4. Dedup: if both engines hit the same ``drawer_id`` / ``turn_id``,
    keep BOTH as separate sources (different ``kind``) but count as
    one dedup slot. The caller sees structured + raw for that turn.
 """
@@ -39,6 +39,7 @@ from typing import Any
 from itsme.core.adapters import MemPalaceAdapter, MemPalaceHit
 from itsme.core.aleph.api import Aleph
 from itsme.core.aleph.store.index import ExtractionHit
+from itsme.core.aleph.vault import AlephVault, PageHit
 
 _logger = logging.getLogger(__name__)
 
@@ -74,27 +75,41 @@ def dual_search(
     *,
     adapter: MemPalaceAdapter,
     aleph: Aleph | None,
+    vault: AlephVault | None = None,
     wing: str | None = None,
     limit: int = 5,
 ) -> list[SearchHit]:
-    """Search both Aleph and MemPalace, merge and deduplicate.
+    """Search Aleph, MemPalace, and optionally the Obsidian vault.
 
     If *aleph* is None (LLM never wired / degraded), falls back to
     MemPalace-only (identical to ``mode='verbatim'`` behavior).
+
+    If *vault* is provided, also searches wiki pages in the Obsidian
+    vault. Wiki hits are ranked first (consolidated knowledge).
 
     Args:
         query: Natural-language search query.
         adapter: MemPalace backend for raw search.
         aleph: Aleph SDK for structured search (None = skip).
+        vault: AlephVault for wiki page search (None = skip).
         wing: Optional wing filter for MemPalace scope.
         limit: Max total results to return.
 
     Returns:
-        Merged list of :class:`SearchHit`, Aleph hits first,
-        then MemPalace gap-fills, up to *limit* total unique turns.
+        Merged list of :class:`SearchHit`, vault wiki hits first,
+        then Aleph extractions, then MemPalace gap-fills, up to
+        *limit* total.
     """
     if not query or not query.strip():
         return []
+
+    # -- Vault wiki search (consolidated knowledge, highest priority)
+    vault_hits: list[PageHit] = []
+    if vault is not None:
+        try:
+            vault_hits = vault.search(query, limit=limit)
+        except Exception as exc:
+            _logger.warning("itsme dual_search: vault search failed: %s", exc)
 
     # -- Aleph search (structured, high precision)
     aleph_hits: list[ExtractionHit] = []
@@ -115,7 +130,31 @@ def dual_search(
     results: list[SearchHit] = []
     seen_drawer_ids: set[str] = set()
 
-    # Aleph hits first (high precision)
+    # Vault wiki hits first (consolidated knowledge)
+    for hit in vault_hits:
+        slug = hit.meta.path.stem
+        content_parts = [hit.meta.summary]
+        if hit.snippet and hit.snippet != hit.meta.summary:
+            content_parts.append(hit.snippet)
+        content = "\n".join(p for p in content_parts if p)
+
+        results.append(
+            SearchHit(
+                kind="wiki",
+                ref=f"vault:{slug}",
+                content=content,
+                score=hit.score,
+                metadata={
+                    "title": hit.meta.title,
+                    "type": hit.meta.type,
+                    "domain": hit.meta.domain,
+                    "subcategory": hit.meta.subcategory,
+                    "path": str(hit.meta.path),
+                },
+            )
+        )
+
+    # Aleph extraction hits next (high precision)
     for hit in aleph_hits:
         drawer_id = hit.extraction.turn_id
         if drawer_id:
@@ -175,3 +214,56 @@ def _normalize_fts5_rank(rank: float) -> float:
     except OverflowError:
         score = 0.0 if rank > 0 else 1.0
     return max(0.0, min(1.0, score))
+
+
+def vault_search(
+    query: str,
+    *,
+    vault: AlephVault,
+    limit: int = 5,
+) -> list[SearchHit]:
+    """Search only the Obsidian vault wiki pages.
+
+    Used by ``ask(mode='wiki')``.
+
+    Args:
+        query: Natural-language search query.
+        vault: AlephVault instance.
+        limit: Max results.
+
+    Returns:
+        List of :class:`SearchHit` with ``kind="wiki"``.
+    """
+    if not query or not query.strip():
+        return []
+
+    try:
+        hits = vault.search(query, limit=limit)
+    except Exception as exc:
+        _logger.warning("itsme vault_search: search failed: %s", exc)
+        return []
+
+    results: list[SearchHit] = []
+    for hit in hits:
+        slug = hit.meta.path.stem
+        content_parts = [hit.meta.summary]
+        if hit.snippet and hit.snippet != hit.meta.summary:
+            content_parts.append(hit.snippet)
+        content = "\n".join(p for p in content_parts if p)
+
+        results.append(
+            SearchHit(
+                kind="wiki",
+                ref=f"vault:{slug}",
+                content=content,
+                score=hit.score,
+                metadata={
+                    "title": hit.meta.title,
+                    "type": hit.meta.type,
+                    "domain": hit.meta.domain,
+                    "subcategory": hit.meta.subcategory,
+                    "path": str(hit.meta.path),
+                },
+            )
+        )
+    return results[:limit]

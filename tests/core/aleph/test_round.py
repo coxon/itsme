@@ -424,9 +424,7 @@ class TestParseRoundResponse:
         assert len(ops) == 0
 
     def test_whitespace_only_slug_rejected(self) -> None:
-        ops = _parse_round_response(
-            json.dumps([{"action": "update", "slug": "   "}])
-        )
+        ops = _parse_round_response(json.dumps([{"action": "update", "slug": "   "}]))
         assert len(ops) == 0
 
     def test_non_list_related_rejected(self) -> None:

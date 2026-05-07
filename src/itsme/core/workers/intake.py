@@ -7,7 +7,8 @@ pipeline:
 2. Sends the batch to the LLM for extraction
 3. Writes ALL turns to MemPalace (raw, full recall)
 4. Writes KEEP turns to Aleph extraction index (structured, high precision)
-5. Emits ``raw.triaged`` for observability
+5. Feeds KEEP turns to AlephRound for Obsidian vault consolidation
+6. Emits ``raw.triaged`` for observability
 
 The intake worker replaces the router's ``consume_loop`` for hook
 captures. Explicit ``remember()`` calls still go through the router's
@@ -15,7 +16,7 @@ synchronous fast-path and are NOT processed by intake.
 
 LLM degradation: if the LLM is unavailable (no API key, network error),
 turns are written to MemPalace as raw (v0.0.1 behavior) without Aleph
-extraction. No data loss, just lower search precision.
+extraction or vault consolidation. No data loss, just lower search precision.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ from typing import Any
 from itsme.core.adapters import MemPalaceAdapter
 from itsme.core.adapters.naming import room as _room
 from itsme.core.aleph.api import Aleph
+from itsme.core.aleph.round import AlephRound, RoundResult, TurnContent
+from itsme.core.aleph.vault import AlephVault
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.llm import LLMProvider, LLMUnavailableError, StubProvider
 
@@ -80,6 +83,9 @@ class IntakeProcessor:
         aleph: Aleph SDK for extraction writes.
         llm: LLM provider for extraction. StubProvider = degraded mode.
         wing: Wing prefix for MemPalace writes.
+        vault: Optional AlephVault for wiki consolidation. When provided
+            (with a working LLM), kept turns are consolidated into
+            Obsidian vault wiki pages via AlephRound after each batch.
     """
 
     def __init__(
@@ -91,12 +97,14 @@ class IntakeProcessor:
         llm: LLMProvider,
         wing: str,
         degraded: bool | None = None,
+        vault: AlephVault | None = None,
     ) -> None:
         self._bus = bus
         self._adapter = adapter
         self._aleph = aleph
         self._llm = llm
         self._wing = wing
+        self._vault = vault
         # Auto-detect degraded mode: a bare StubProvider (empty response)
         # means no real LLM is available.  A StubProvider with a canned
         # response is used by tests to simulate a working LLM.
@@ -105,11 +113,19 @@ class IntakeProcessor:
         else:
             self._degraded = isinstance(llm, StubProvider) and not llm._response
 
+        # Build AlephRound if vault + working LLM are both available
+        if vault is not None and not self._degraded:
+            self._round: AlephRound | None = AlephRound(vault=vault, llm=llm)
+        else:
+            self._round = None
+
     def process_batch(self, events: list[EventEnvelope]) -> list[IntakeResult]:
         """Process a batch of per-turn raw.captured events.
 
         All turns are written to MemPalace regardless of LLM verdict.
         KEEP turns additionally get Aleph extraction entries.
+        After all writes, KEEP turns are fed to AlephRound for Obsidian
+        vault consolidation (if vault is configured).
 
         Args:
             events: List of ``raw.captured`` events from the same
@@ -130,6 +146,12 @@ class IntakeProcessor:
         for event, extraction in zip(events, extractions, strict=False):
             result = self._write_and_emit(event, extraction)
             results.append(result)
+
+        # Step 3: Consolidate kept turns into Obsidian vault
+        # Only include turns that were kept AND successfully written
+        round_result = self._run_vault_round(events, results)
+        if round_result is not None:
+            self._emit_vault_events(round_result)
 
         return results
 
@@ -274,6 +296,60 @@ class IntakeProcessor:
             drawer_id=drawer_id,
             extraction_id=extraction_id,
         )
+
+    # ---------------------------------------------------------- vault round
+
+    def _run_vault_round(
+        self,
+        events: list[EventEnvelope],
+        results: list[IntakeResult],
+    ) -> RoundResult | None:
+        """Feed successfully-kept turns to AlephRound for vault consolidation.
+
+        Only includes turns that were kept by the LLM AND successfully
+        written to MemPalace (have a drawer_id). This prevents orphan
+        vault entries for turns that failed to write.
+
+        Returns the RoundResult, or None if vault is not configured or
+        no turns qualify.
+        """
+        if self._round is None:
+            return None
+
+        # Collect kept turns that were successfully written
+        kept_turns: list[TurnContent] = []
+        for event, result in zip(events, results, strict=False):
+            if result.verdict != "keep" or not result.drawer_id:
+                continue
+            role = event.payload.get("turn_role", "user")
+            content = event.payload.get("content", "")
+            if content:
+                kept_turns.append(
+                    TurnContent(role=role, content=content, drawer_id=result.drawer_id)
+                )
+
+        if not kept_turns:
+            return None
+
+        try:
+            return self._round.process(kept_turns)
+        except Exception as exc:
+            _logger.error("itsme intake: vault round failed: %s", exc)
+            return None
+
+    def _emit_vault_events(self, round_result: RoundResult) -> None:
+        """Emit wiki.promoted events for vault page operations."""
+        if round_result.pages_created > 0 or round_result.pages_updated > 0:
+            self._bus.emit(
+                type=EventType.WIKI_PROMOTED,
+                source="worker:intake:vault-round",
+                payload={
+                    "pages_created": round_result.pages_created,
+                    "pages_updated": round_result.pages_updated,
+                    "pages_skipped": round_result.pages_skipped,
+                    "errors": round_result.errors,
+                },
+            )
 
     # ---------------------------------------------------------- async loop
 

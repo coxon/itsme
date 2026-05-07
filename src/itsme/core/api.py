@@ -31,10 +31,11 @@ from itsme.core.adapters import (
 )
 from itsme.core.adapters.naming import wing as _wing
 from itsme.core.aleph.api import Aleph
+from itsme.core.aleph.vault import AlephVault
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.llm import LLMProvider, StubProvider, build_llm_provider
-from itsme.core.search import SearchHit, dual_search
+from itsme.core.search import SearchHit, dual_search, vault_search
 from itsme.core.workers.intake import IntakeProcessor
 from itsme.core.workers.router import Router
 
@@ -120,6 +121,9 @@ class Memory:
             (v0.0.2). When None, ``mode='auto'`` degrades to verbatim.
         llm: Optional :class:`LLMProvider` for intake processing.
             When None, intake degrades to raw MemPalace writes only.
+        vault: Optional :class:`AlephVault` for Obsidian wiki integration.
+            When provided with a working LLM, intake consolidates kept
+            turns into vault wiki pages. Also enables ``ask(mode='wiki')``.
     """
 
     def __init__(
@@ -130,6 +134,7 @@ class Memory:
         project: str = "default",
         aleph: Aleph | None = None,
         llm: LLMProvider | None = None,
+        vault: AlephVault | None = None,
     ) -> None:
         self._bus = bus
         self._adapter: MemPalaceAdapter = adapter or InMemoryMemPalaceAdapter()
@@ -137,6 +142,7 @@ class Memory:
         self._router = Router(bus=self._bus, adapter=self._adapter, wing=self._wing)
         self._aleph = aleph
         self._llm = llm
+        self._vault = vault
 
         # Build intake processor for hook captures (replaces router
         # consume_loop for non-explicit sources in v0.0.2).
@@ -147,6 +153,7 @@ class Memory:
                 aleph=self._aleph,
                 llm=self._llm or StubProvider(),
                 wing=self._wing,
+                vault=self._vault,
             )
         else:
             self._intake = None
@@ -272,17 +279,19 @@ class Memory:
     ) -> AskResult:
         """Query memory and emit ``memory.queried``.
 
-        Supports two modes in v0.0.2:
+        Supports three modes:
 
         * ``verbatim`` — MemPalace-only keyword search (v0.0.1 behavior).
-        * ``auto`` — dual-engine: Aleph extraction index (high precision)
-          + MemPalace raw (high recall), merged and deduplicated.
+        * ``auto`` — triple-engine: Vault wiki (consolidated knowledge)
+          + Aleph extraction index (high precision) + MemPalace raw
+          (high recall), merged and deduplicated.
+        * ``wiki`` — Vault wiki pages only (Obsidian vault search).
 
-        ``wiki`` and ``now`` modes are deferred to v0.0.3+.
+        ``now`` mode is deferred to v0.0.4+.
 
         Args:
             question: Natural-language query.
-            mode: Read strategy — ``"verbatim"`` or ``"auto"``.
+            mode: Read strategy.
             limit: Max number of hits to return.
             scope_to_project: When True, restrict the MemPalace search
                 to the project's wing; when False, search across all wings.
@@ -299,14 +308,16 @@ class Memory:
             raise ValueError("ask(question=...) must be non-empty")
         if limit <= 0:
             raise ValueError("limit must be positive")
-        if mode not in ("verbatim", "auto"):
+        if mode not in ("verbatim", "auto", "wiki"):
             raise NotImplementedError(
-                f"mode={mode!r} is not implemented in v0.0.2 — "
-                "only 'verbatim' and 'auto' are supported"
+                f"mode={mode!r} is not implemented — "
+                "only 'verbatim', 'auto', and 'wiki' are supported"
             )
 
         wing_filter = self._wing if scope_to_project else None
 
+        if mode == "wiki":
+            return self._ask_wiki(question, limit=limit)
         if mode == "auto":
             return self._ask_auto(question, wing_filter=wing_filter, limit=limit)
         return self._ask_verbatim(question, wing_filter=wing_filter, limit=limit)
@@ -360,20 +371,20 @@ class Memory:
         wing_filter: str | None,
         limit: int,
     ) -> AskResult:
-        """Dual-engine search: Aleph (structured) + MemPalace (raw).
+        """Triple-engine search: Vault wiki + Aleph + MemPalace.
 
-        When Aleph is not wired (None), gracefully degrades to
-        MemPalace-only — identical to verbatim behavior but with
-        mode='auto' in the event payload for observability.
+        When Aleph or vault is not wired (None), gracefully degrades.
         """
         hits = dual_search(
             question,
             adapter=self._adapter,
             aleph=self._aleph,
+            vault=self._vault,
             wing=wing_filter,
             limit=limit,
         )
 
+        wiki_hits = sum(1 for h in hits if h.kind == "wiki")
         evt = self._bus.emit(
             type=EventType.MEMORY_QUERIED,
             source="reader",
@@ -381,6 +392,7 @@ class Memory:
                 "question": question,
                 "mode": "auto",
                 "hit_count": len(hits),
+                "wiki_hits": wiki_hits,
                 "aleph_hits": sum(1 for h in hits if h.kind == "extraction"),
                 "mp_hits": sum(1 for h in hits if h.kind == "verbatim"),
                 "wing": wing_filter,
@@ -390,6 +402,48 @@ class Memory:
         sources = [
             AskSource(
                 kind=h.kind,  # type: ignore[arg-type]
+                ref=h.ref,
+                content=h.content,
+                score=h.score,
+            )
+            for h in hits
+        ]
+        return AskResult(
+            answer=_stitch_auto_answer(hits),
+            sources=sources,
+            queried_event_id=evt.id,
+            promoted=False,
+            promotion_event_id=None,
+        )
+
+    def _ask_wiki(
+        self,
+        question: str,
+        *,
+        limit: int,
+    ) -> AskResult:
+        """Vault wiki page search only.
+
+        When vault is not wired, returns empty results (no error).
+        """
+        if self._vault is None:
+            hits: list[SearchHit] = []
+        else:
+            hits = vault_search(question, vault=self._vault, limit=limit)
+
+        evt = self._bus.emit(
+            type=EventType.MEMORY_QUERIED,
+            source="reader",
+            payload={
+                "question": question,
+                "mode": "wiki",
+                "hit_count": len(hits),
+            },
+        )
+
+        sources = [
+            AskSource(
+                kind="wiki",
                 ref=h.ref,
                 content=h.content,
                 score=h.score,
@@ -487,6 +541,7 @@ class Memory:
         self._bus.close()
         if self._aleph is not None:
             self._aleph.close()
+        # AlephVault has no close — it's just a path wrapper
 
 
 # --------------------------------------------------------------------------
@@ -535,6 +590,7 @@ def build_default_memory(
     adapter: MemPalaceAdapter | None = None,
     aleph: Aleph | None = None,
     llm: LLMProvider | None = None,
+    vault: AlephVault | None = None,
 ) -> Memory:
     """Construct a :class:`Memory` with sensible defaults.
 
@@ -549,6 +605,11 @@ def build_default_memory(
     If *llm* is not passed, :func:`build_llm_provider` is called to
     auto-detect from ``$DEEPSEEK_API_KEY``. If no key is set, intake
     runs in degraded mode (raw writes only, no extraction).
+
+    If *vault* is not passed, auto-discovers the Obsidian Aleph vault
+    at ``$ITSME_ALEPH_VAULT`` or ``~/Documents/Aleph/``. When found,
+    enables vault wiki consolidation during intake and
+    ``ask(mode='wiki')`` search.
 
     Backend selection (when *adapter* is not passed) keys off
     ``$ITSME_MEMPALACE_BACKEND``:
@@ -577,7 +638,16 @@ def build_default_memory(
                 "Set DEEPSEEK_API_KEY to enable LLM intake.",
                 file=sys.stderr,
             )
-    return Memory(bus=bus, adapter=adapter, project=project, aleph=aleph, llm=llm)
+    if vault is None:
+        vault = _discover_vault()
+    return Memory(
+        bus=bus,
+        adapter=adapter,
+        project=project,
+        aleph=aleph,
+        llm=llm,
+        vault=vault,
+    )
 
 
 def _select_mempalace_backend() -> MemPalaceAdapter:
@@ -623,3 +693,36 @@ def _select_mempalace_backend() -> MemPalaceAdapter:
     raise ValueError(
         f"unknown ITSME_MEMPALACE_BACKEND={backend!r} " "(expected one of: auto, inmemory, stdio)"
     )
+
+
+def _discover_vault() -> AlephVault | None:
+    """Auto-discover the Obsidian Aleph vault.
+
+    Checks ``$ITSME_ALEPH_VAULT`` first, then falls back to
+    ``~/Documents/Aleph/``. Returns None if no vault is found
+    (vault integration is optional — just means no wiki writes or
+    wiki search).
+    """
+    import os
+    import sys
+
+    env_path = os.environ.get("ITSME_ALEPH_VAULT", "").strip()
+    candidates: list[Path] = []
+    if env_path:
+        candidates.append(Path(env_path).expanduser())
+    candidates.append(Path.home() / "Documents" / "Aleph")
+
+    for candidate in candidates:
+        if (candidate / "dna.md").exists():
+            try:
+                vault = AlephVault(candidate)
+                print(f"itsme: Aleph vault discovered at {candidate}", file=sys.stderr)
+                return vault
+            except Exception as exc:
+                print(
+                    f"itsme: Aleph vault found at {candidate} but failed to open: {exc}",
+                    file=sys.stderr,
+                )
+                continue  # try next candidate
+
+    return None
