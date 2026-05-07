@@ -128,13 +128,12 @@ class AlephRound:
                 if action == "create":
                     self._execute_create(op, today)
                     result.pages_created += 1
-                    new_index_entries.append(self._make_index_entry(op, today))
+                    new_index_entries.append(self._make_index_entry_from_page(op["slug"], today))
                 elif action == "update":
                     self._execute_update(op, today)
                     result.pages_updated += 1
-                    # Update index entry if summary changed
-                    if op.get("summary"):
-                        new_index_entries.append(self._make_index_entry(op, today))
+                    # Always refresh index entry after update (uses actual page meta)
+                    new_index_entries.append(self._make_index_entry_from_page(op["slug"], today))
                 else:
                     _logger.warning("aleph round: unknown action %r, skipping", action)
                     result.pages_skipped += 1
@@ -257,14 +256,23 @@ class AlephRound:
             append_history=op.get("history_entry", f"- {today} 更新，来源: itsme intake"),
         )
 
-    @staticmethod
-    def _make_index_entry(op: dict[str, Any], today: str) -> IndexEntry:
-        slug = op["slug"]
+    def _make_index_entry_from_page(self, slug: str, today: str) -> IndexEntry:
+        """Build an IndexEntry from actual page metadata (not raw LLM op)."""
+        meta = self._vault.find_page(slug)
+        if meta is not None:
+            return IndexEntry(
+                page_link=f"[[{slug}]]",
+                type=meta.type,
+                wing_sub=f"{meta.domain} / {meta.subcategory}",
+                summary=meta.summary,
+                date=today,
+            )
+        # Fallback if page somehow not found (shouldn't happen after create/update)
         return IndexEntry(
             page_link=f"[[{slug}]]",
-            type=op.get("type", ""),
-            wing_sub=f"{op.get('domain', '')} / {op.get('subcategory', '')}",
-            summary=op.get("summary", ""),
+            type="",
+            wing_sub="",
+            summary="",
             date=today,
         )
 

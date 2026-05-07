@@ -28,7 +28,7 @@ def vault(tmp_path: Path) -> AlephVault:
     return AlephVault(tmp_path)
 
 
-def _make_llm_response(operations: list[dict]) -> str:
+def _make_llm_response(operations: list[dict[str, object]]) -> str:
     return json.dumps(operations)
 
 

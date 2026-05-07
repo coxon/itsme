@@ -105,6 +105,21 @@ class AlephVault:
     def root(self) -> Path:
         return self._root
 
+    # ------------------------------------------------------- path safety
+
+    def _safe_resolve(self, path: Path) -> Path:
+        """Resolve *path* and verify it stays within the vault root.
+
+        Raises ValueError if the resolved path escapes the vault
+        (e.g. via ``../`` segments or symlinks).
+        """
+        resolved = path.resolve()
+        if not str(resolved).startswith(str(self._root.resolve())):
+            raise ValueError(
+                f"Path escapes vault: {path} resolves to {resolved} " f"(vault root: {self._root})"
+            )
+        return resolved
+
     # ------------------------------------------------------- read operations
 
     def list_pages(self) -> list[PageMeta]:
@@ -118,7 +133,7 @@ class AlephVault:
 
     def read_page(self, rel_path: str | Path) -> tuple[PageMeta | None, str]:
         """Read a page by relative path. Returns (meta, body)."""
-        full = self._root / rel_path
+        full = self._safe_resolve(self._root / rel_path)
         if not full.exists():
             return None, ""
         text = full.read_text(encoding="utf-8")
@@ -130,10 +145,17 @@ class AlephVault:
         """Find a page by slug (filename without .md).
 
         Searches all wings. Returns the first match or None.
+        Raises ValueError if multiple pages share the same slug.
         """
+        matches: list[PageMeta] = []
         for md_file in self._wings_dir.rglob(f"{slug}.md"):
-            return self._parse_frontmatter(md_file)
-        return None
+            meta = self._parse_frontmatter(md_file)
+            if meta is not None:
+                matches.append(meta)
+        if len(matches) > 1:
+            paths = [str(m.path) for m in matches]
+            raise ValueError(f"Duplicate slug '{slug}' found in: {paths}")
+        return matches[0] if matches else None
 
     def find_by_title_or_alias(self, name: str) -> PageMeta | None:
         """Find a page whose title or alias matches *name* (case-insensitive)."""
@@ -257,13 +279,23 @@ class AlephVault:
 
         Creates the subcategory directory if it doesn't exist.
         Raises FileExistsError if the page already exists (use update_page).
+        Raises ValueError if the slug already exists in another wing,
+            or if any path component contains traversal sequences.
         """
+        # Validate path components — reject traversal before any I/O
+        for component in (slug, domain, subcategory):
+            if ".." in component or "/" in component or "\\" in component:
+                raise ValueError(f"Path component contains traversal chars: {component!r}")
+
+        # Check global slug uniqueness
+        existing = self.find_page(slug)
+        if existing is not None:
+            raise FileExistsError(f"Slug '{slug}' already exists at {existing.path}")
+
         page_dir = self._wings_dir / domain / subcategory
         page_dir.mkdir(parents=True, exist_ok=True)
         page_path = page_dir / f"{slug}.md"
-
-        if page_path.exists():
-            raise FileExistsError(f"Page already exists: {page_path}")
+        self._safe_resolve(page_path)  # belt-and-suspenders containment check
 
         content = self._render_page(frontmatter, body)
         page_path.write_text(content, encoding="utf-8")
@@ -284,7 +316,7 @@ class AlephVault:
         - append_body: appended before the History section
         - append_history: appended to the History section
         """
-        full = self._root / rel_path
+        full = self._safe_resolve(self._root / rel_path)
         if not full.exists():
             raise FileNotFoundError(f"Page not found: {full}")
 
@@ -342,10 +374,13 @@ class AlephVault:
             "|------|------|------------|------|---------|",
         ]
         for entry in sorted(by_link.values(), key=lambda e: e.page_link):
-            lines.append(
-                f"| {entry.page_link} | {entry.type} | {entry.wing_sub} "
-                f"| {entry.summary} | {entry.date} |"
-            )
+            # Sanitize cells: collapse newlines, escape pipe chars
+            link = _sanitize_cell(entry.page_link)
+            typ = _sanitize_cell(entry.type)
+            ws = _sanitize_cell(entry.wing_sub)
+            summ = _sanitize_cell(entry.summary)
+            dt = _sanitize_cell(entry.date)
+            lines.append(f"| {link} | {typ} | {ws} | {summ} | {dt} |")
 
         index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -446,3 +481,8 @@ class AlephVault:
             width=120,
         ).rstrip("\n")
         return f"---\n{fm_str}\n---\n\n{body}"
+
+
+def _sanitize_cell(value: str) -> str:
+    """Collapse newlines and escape pipes in a markdown table cell."""
+    return value.replace("\n", " ").replace("\r", " ").replace("|", "\\|").strip()

@@ -403,3 +403,98 @@ class TestFrontmatterParsing:
         pages = vault.list_pages()
         assert len(pages) == 1
         assert pages[0].aliases == []
+
+
+# ============================================================
+# Path safety
+# ============================================================
+
+
+class TestPathSafety:
+    def test_write_path_escape_blocked(self, vault: AlephVault) -> None:
+        """Slug with ../ cannot escape vault."""
+        with pytest.raises((ValueError, FileExistsError)):
+            vault.write_page(
+                slug="../../../etc/evil",
+                domain="technology",
+                subcategory="ai",
+                frontmatter={
+                    "title": "Evil",
+                    "type": "concept",
+                    "domain": "technology",
+                    "subcategory": "ai",
+                    "summary": "x",
+                    "tags": [],
+                },
+                body="# Evil\n",
+            )
+
+    def test_read_path_escape_blocked(self, vault: AlephVault) -> None:
+        with pytest.raises(ValueError, match="escapes vault"):
+            vault.read_page("../../etc/passwd")
+
+    def test_update_path_escape_blocked(self, vault: AlephVault) -> None:
+        with pytest.raises(ValueError, match="escapes vault"):
+            vault.update_page("../../etc/passwd", frontmatter_updates={"title": "x"})
+
+    def test_duplicate_slug_across_wings_blocked(self, vault: AlephVault) -> None:
+        """Same slug in different wings is rejected on create."""
+        vault.write_page(
+            slug="shared-name",
+            domain="technology",
+            subcategory="ai",
+            frontmatter={
+                "title": "A",
+                "type": "concept",
+                "domain": "technology",
+                "subcategory": "ai",
+                "summary": "x",
+                "tags": [],
+            },
+            body="# A\n",
+        )
+        with pytest.raises(FileExistsError, match="shared-name"):
+            vault.write_page(
+                slug="shared-name",
+                domain="work",
+                subcategory="projects",
+                frontmatter={
+                    "title": "B",
+                    "type": "project",
+                    "domain": "work",
+                    "subcategory": "projects",
+                    "summary": "y",
+                    "tags": [],
+                },
+                body="# B\n",
+            )
+
+
+# ============================================================
+# Index sanitization
+# ============================================================
+
+
+class TestIndexSanitization:
+    def test_pipe_in_summary_escaped(self, vault: AlephVault) -> None:
+        """Pipe chars in summary don't break the table."""
+        vault.update_index(
+            [
+                IndexEntry("[[test]]", "concept", "tech / ai", "A | B summary", "2026-05-07"),
+            ]
+        )
+        entries = vault.read_index()
+        assert len(entries) == 1
+        assert "A" in entries[0].summary
+
+    def test_newline_in_summary_collapsed(self, vault: AlephVault) -> None:
+        vault.update_index(
+            [
+                IndexEntry("[[test]]", "concept", "tech / ai", "line1\nline2", "2026-05-07"),
+            ]
+        )
+        text = (vault.root / "index.md").read_text()
+        # No raw newlines inside a table row
+        for line in text.split("\n"):
+            if "[[test]]" in line:
+                assert "\n" not in line.strip()
