@@ -50,30 +50,31 @@ Return a JSON array of page operations. Output ONLY the JSON array — no markdo
 1. **一个实体 = 一个页面**。xAI 和 Andrej Karpathy 是不同实体，必须有各自独立的页面。绝不能把 A 实体的信息塞到 B 实体的页面里，即使它们属于同一领域。
 2. **Update 仅限同一实体**。只有当新信息**直接描述**已有页面的主实体时，才用 update。"A 的前同事去了 B 公司" → 更新 A 的页面是对的；但"B 公司发布了新产品" → 不能更新 A 的页面，应该为 B 创建新页面。
 3. **相关 ≠ 合并**。两个实体有关联，用 `related` 字段互相引用，不要把一个实体的核心内容写进另一个的 body。
+4. **related 需有直接实质性关联**。`related` 只用于有直接关系的实体（共事、师徒、收购方-被收购方、产品-公司、同一事件的当事人等）。不要仅因为同属一个 domain/subcategory 就互相引用。如果两个人只是"都在 AI 领域"，那不算 related。
 
 ### Granularity — 什么值得建页面
 
-4. **独立可查询原则**：只为"用户将来会独立搜索"的实体建页面。被一笔带过的不建页面——在相关页面的 body 里提一句即可。
-5. **公司 / 组织单独建页**：公司（xAI, OpenAI, SpaceX 等）如果有实质性信息（产品、融资、人事变动、战略），应该独立建页，type=company，放 `technology/companies` 或 `financial/companies`。
-6. **产品 / 模型单独建页**：重要的产品线（如 Grok 系列）如果有详细版本、参数、对比信息，可以独立建页 type=product。小版本更新合并到产品页面。
+5. **独立可查询原则**：只为"用户将来会独立搜索"的实体建页面。被一笔带过的不建页面——在相关页面的 body 里提一句即可。
+6. **公司 / 组织单独建页**：公司（xAI, OpenAI, SpaceX 等）如果有实质性信息（产品、融资、人事变动、战略），应该独立建页，type=company，放 `technology/companies` 或 `financial/companies`。
+7. **产品 / 模型单独建页**：重要的产品线（如 Grok 系列）如果有详细版本、参数、对比信息，可以独立建页 type=product。小版本更新合并到产品页面。
 
 ### Merge vs Create
 
-7. **同一实体 → update**。如果已有页面的 slug 就是这个实体，update 它。
-8. **不同实体 → create**。即使已有页面属于同一 domain/subcategory，也要新建。不要因为"technology/people 下已有 Karpathy 页面"就把所有 AI 人物信息都塞进去。
-9. **有疑问 → 偏向 create**。创建冗余页面比污染已有页面伤害小。
+8. **同一实体 → update**。如果已有页面的 slug 就是这个实体，update 它。
+9. **不同实体 → create**。即使已有页面属于同一 domain/subcategory，也要新建。不要因为"technology/people 下已有 Karpathy 页面"就把所有 AI 人物信息都塞进去。
+10. **有疑问 → 偏向 create**。创建冗余页面比污染已有页面伤害小。
 
 ### Wing & structure（Wing = domain/subcategory 分类体系）
 
-10. **Wing 匹配**：domain 和 subcategory 匹配现有结构。需要时可以新建 subcategory（如 `technology/companies`）。
-11. **Slug 格式**：永远用 kebab-case 英文，即使标题是中文（用拼音或翻译）。
+11. **Wing 匹配**：domain 和 subcategory 匹配现有结构。需要时可以新建 subcategory（如 `technology/companies`）。
+12. **Slug 格式**：永远用 kebab-case 英文，即使标题是中文（用拼音或翻译）。
 
 ### Content quality
 
-12. **Minimal updates**：只在页面确实获得新信息时才 update。仅仅被提及不算。
-13. **Skip noise**：对话里没有任何值得记录的知识 → 返回 `[]`。
-14. **Language**：标题和摘要跟随源内容语言。中文对话 → 中文标题/摘要。
-15. **Self-contained summary**：summary 要能脱离上下文独立理解。不要写"补充了 xAI 相关信息"，要写"xAI 创始团队 11 人中 9 人已离职，Grok 4.3 于 2026 年 5 月发布"。
+13. **Minimal updates**：只在页面确实获得新信息时才 update。仅仅被提及不算。
+14. **Skip noise**：对话里没有任何值得记录的知识 → 返回 `[]`。
+15. **Language**：标题和摘要跟随源内容语言。中文对话 → 中文标题/摘要。
+16. **Self-contained summary**：summary 要能脱离上下文独立理解。不要写"补充了 xAI 相关信息"，要写"xAI 创始团队 11 人中 9 人已离职，Grok 4.3 于 2026 年 5 月发布"。
 
 ## Examples
 
