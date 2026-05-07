@@ -34,6 +34,7 @@ Run via ``uv run pytest tests/smoke/ -v`` for the full smoke suite.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -387,6 +388,10 @@ def test_hook_noop_when_disabled(
 # persist across restarts.
 
 
+_has_mempalace = importlib.util.find_spec("mempalace") is not None
+
+
+@pytest.mark.skipif(not _has_mempalace, reason="mempalace not installed")
 def test_cross_restart_drawer_survives(db_path: Path) -> None:
     """Cross-restart drawer survival — MemPalace persists drawers.
 
