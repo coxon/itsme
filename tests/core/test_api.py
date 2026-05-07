@@ -101,13 +101,20 @@ def test_ask_rejects_non_positive_limit(memory: Memory) -> None:
         memory.ask("q", limit=0)
 
 
-@pytest.mark.parametrize("mode", ["wiki", "now"])
+@pytest.mark.parametrize("mode", ["now"])
 def test_ask_unsupported_modes_raise(memory: Memory, mode: str) -> None:
-    """v0.0.2 only implements 'verbatim' and 'auto'."""
+    """Only 'now' mode remains unimplemented."""
     from typing import Literal, cast
 
     with pytest.raises(NotImplementedError):
-        memory.ask("q", mode=cast(Literal["wiki", "now"], mode))
+        memory.ask("q", mode=cast(Literal["now"], mode))
+
+
+def test_ask_wiki_no_vault(memory: Memory) -> None:
+    """ask(mode=wiki) with no vault returns empty results, no error."""
+    result = memory.ask("anything", mode="wiki")
+    assert result.sources == []
+    assert result.queried_event_id
 
 
 def test_ask_scopes_to_project_wing_by_default(memory: Memory) -> None:
