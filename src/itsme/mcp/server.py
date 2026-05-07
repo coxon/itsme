@@ -29,7 +29,9 @@ SERVER_NAME = "itsme"
 SERVER_INSTRUCTIONS = (
     "Long-term memory plugin: 3 verbs. "
     "remember(content, kind?) writes verbatim. "
-    "ask(question, mode?) reads verbatim (v0.0.1). "
+    "ask(question, mode?) reads memory — mode='auto' (default) "
+    "uses dual-engine search (Aleph structured + MemPalace raw), "
+    "mode='verbatim' searches MemPalace only. "
     "status(scope?, format?) shows recent activity."
 )
 
@@ -46,8 +48,8 @@ def build_server(memory: Memory) -> FastMCP[Any]:
         """Persist a memory drawer. Returns the new event id + drawer id."""
         return remember_handler(memory, content=content, kind=kind)
 
-    def ask(question: str, mode: str = "verbatim", limit: int = 5) -> dict[str, Any]:
-        """Search verbatim memory. v0.0.1 only supports mode='verbatim'."""
+    def ask(question: str, mode: str = "auto", limit: int = 5) -> dict[str, Any]:
+        """Search memory. mode='auto' (dual-engine) or 'verbatim' (MemPalace only)."""
         return ask_handler(memory, question=question, mode=mode, limit=limit)
 
     def status(
@@ -67,7 +69,7 @@ def build_server(memory: Memory) -> FastMCP[Any]:
     server.add_tool(
         ask,
         name="ask",
-        description="Query verbatim memory and return ranked passages.",
+        description="Query memory and return ranked passages.",
     )
     server.add_tool(
         status,

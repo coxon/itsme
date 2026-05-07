@@ -3,7 +3,7 @@
 > Status: **Design draft** · v0.0.x
 > Repo: <https://github.com/coxon/itsme>
 > Language: **Python**
-> Last updated: 2026-05-06
+> Last updated: 2026-05-07
 
 策略：**端到端最薄一刀** 先打通，再逐步加厚。
 
@@ -25,6 +25,11 @@
 - ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（`core/adapters/mempalace.py`）+ **stdio MCP-client backend 已落地**（`core/adapters/mempalace_stdio.py`，T1.13.5，v0.0.1 GA），由 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 - ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
+- ✅ LLM 模型：统一用 **DeepSeek**（`deepseek-chat`，`$ITSME_LLM_MODEL` 可覆盖）；API key 通过 `$DEEPSEEK_API_KEY` 配置
+- ✅ Aleph v0.0.2 形态：**per-turn extraction index**（sqlite + FTS5），不含 wiki consolidation / vault 写入 / merge / crosslink。完整 Aleph pipeline 推迟到 v0.0.3
+- ✅ ask 搜索策略：**双引擎并行**（Aleph structured + MemPalace raw）→ 合并去重返回。结构化层是**搜索增强器，不是替代器**——LLM 提取遗漏时 MemPalace raw 兜底，永远不漏
+- ✅ Intake 运行位置：**router 异步 consume loop**（不阻塞 hook 进程）；explicit `remember()` 不走 intake，保持同步 fast-path
+- ✅ LLM 降级策略：API 不可用时 raw 直存 MemPalace（同 v0.0.1 行为），不写 Aleph，不阻塞
 
 ---
 
@@ -33,8 +38,8 @@
 | 版本 | 主题 | 关键交付 | 估算 |
 |---|---|---|---|
 | **v0.0.1** | 端到端骨架 | hook → events → router → MemPalace → ask 直查 MP，能装进 CC | ~1.5 周 |
-| **v0.0.2** | Aleph MVP | 自建 Aleph 模块（extract+write+search），promoter 跑通，wiki 落 vault | ~3-4 周 |
-| **v0.0.3** | 反向升格 | `ask(promote=true)` 融合 + 写回；merge / crosslink pipeline | ~2 周 |
+| **v0.0.2** | Intake + Aleph Index | LLM intake → per-turn extraction index + MemPalace raw → `ask(mode=auto)` 双引擎搜索 | ~3-4 周 |
+| **v0.0.3** | Wiki Consolidation | promoter → wiki entry → vault；embedding 搜索；`ask(promote=true)` 反向升格；merge / crosslink | ~3-4 周 |
 | **v0.0.4** | Curator + 体验 | 去重、KG 失效、skill 文档完整、status feed 渲染 | ~1.5 周 |
 | **v0.0.5+** | 长尾 | 跨 session 主题聚类、主动召回、KG 推理、用户笔记区块契约 | — |
 
@@ -91,92 +96,103 @@
 
 ---
 
-## v0.0.2 — Aleph MVP（从 0 自建）
+## v0.0.2 — Intake + Aleph Extraction Index
 
-**目标**：写出 Aleph 进程内模块，能 extract、能 write entry、能 search、能被 promoter 调度。session 结束自动把 raw 蒸馏到 wiki，落 Obsidian vault。`ask(mode=auto)` 先 wiki 后 verbatim。
+**目标**：hook 捕获经 LLM intake 提取结构化数据（summary/entities/claims），存入 Aleph extraction index（sqlite + FTS5）。MemPalace 继续存 raw 原文（per-turn drawer，不再是 2000 token blob）。`ask(mode=auto)` 双引擎搜索：Aleph 结构化（高精度）+ MemPalace raw（高召回），合并去重。
 
-> ⚠️ 这是工期最大的一版。Aleph 从 0 写，含 LLM pipeline、vault 读写、混合检索。
+> **设计原则**：MemPalace 是"什么都记"的原料仓——搜索面是 raw 全文。Aleph extraction index 是 LLM 提取的结构化搜索增强层。`ask` 搜两路合并，**结构化层漏提取时 MemPalace raw 兜底，永远不丢**。
+
+> **成本**：Intake 用 DeepSeek（统一模型，`$ITSME_LLM_MODEL` 可覆盖），v0.0.3+ 视成本按需拆分。
 
 ### Tasks
 
-#### Pre-Aleph — Router 静默规则 + 读侧召回修复（落地 R1 缓解 + 2026-05-06 跨 session 验证暴露）
-- [ ] **T2.0** **Router 静默规则**（v0.0.1 dogfood 暴露：每次 hook capture 把 CC 注入的 SKILL.md / `<command-name>` envelope / system prompt 都吞进 `raw.captured`，drawer 噪音 + 搜索召回污染。R1 早识别，但 v0.0.1 没落地缓解）。在 `core/workers/router.py` 写前加 filter 层：识别 CC 注入 boilerplate（`<command-name>...</command-args>` block、SKILL.md 整段注入、system prompt 形态）、低信息 chunk、近窗 hash 重复（T1.19 已覆盖完全相同内容，这里覆盖近似）→ emit `raw.dropped` event（不静默吞，留可观察性，`status` 能看到 dropped reason）→ 不调 `route_and_store`。规则按 plugin 抽成 `core/filters/`：`boilerplate.py` / `low_info.py` / `hash_dup_recent.py` / `system_injection.py`，每条规则可单独开关。**只过滤 hook capture，不过滤 explicit `remember()`**（用户/agent 显式意图 100% 入库）。是否引入 `raw.dropped` 新 event type 待评估（vs 复用 `memory.curated` with `reason="dropped_by_filter"`）。
-  - **T2.0a** **Envelope 过滤**：去掉 `<local-command-caveat>` / `<command-name>` / `<command-message>` / `<command-args>` / `<local-command-stdout>` 五件套块（CC 在 `/exit` 等 slash command 触发时注入到 transcript 的 control envelope，不是用户语义内容）。
-  - **T2.0b-write** **Turn 切片**：当前 `hook:lifecycle.before-exit` 把整个 transcript tail 拼成 **一个** ~2000 token 的 `raw.captured`，包含用户提问 + assistant 答复 + envelope 全部混合。改为按 turn（user / assistant 各 1 段）切成多条 `raw.captured`，每条独立 `content_hash` 和 `producer_kind`。理由见 T2.0c：长 drawer 是召回失败的根因之一。
-- [ ] **T2.0c** **读侧召回修复**（2026-05-06 跨 session 验证新暴露）。**症状**：hook capture 写入成功（drawer 在 `room_general`、content_hash 算了），但 verbatim ranker 用单/双 token 短查询（`Apollo` / `Warfighter OS` / `断联战区无人机`）召回 0 hit；同 session 用同样 ranker 查 ~30 token 的 `Verify-decision` drawer 能拿 score 0.29。**诊断**：长 drawer（~2000 token markdown blob）+ 短 query → ranker 当前 `matched / total` 公式被文档长度稀释到阈值下；同时 markdown 修饰（`**Apollo**` / `| Apollo |`）的分词没处理，命中受影响。**修复**：
-  - 长度归一：分母改用 `sqrt(doc_tokens)` 或类似次线性公式，避免短 query 在长文档上被稀释（`InMemoryMemPalaceAdapter` + `mempalace_stdio` 的 ranker 都要改）
-  - Markdown 预处理：tokenizer 把 `*` / `_` / `|` / `` ` `` 当分隔符（继 T1.13.5 CJK 修复后第二轮分词器升级）
-  - 最低分阈值：避免 `zxqvbn-12345` 这种全失配 query 也返回 score 0.04 的尾巴（hit_count 失真）
-  - 回归：以 2026-05-06 12:57 UTC 那条 raw_event（`01KQYNTJS3A47E2AZXE0YR5552`，含 Apollo / Warfighter OS / 断联战区无人机 三个 verbatim token）为 fixture，pin 修复前后召回行为
-  - 关系：T2.0a/b 治源（drawer 别那么大那么脏），T2.0c 治末（就算 drawer 偶尔大也能查得出）。两边都做。
+#### Pre-intake — 结构性清洗（无 LLM）
 
-#### Aleph 核心 — 数据模型 & 存储
-- [ ] **T2.1** `core/aleph/types.py`：`WikiEntry` / `Claim` / `Reference` 数据类
-- [ ] **T2.2** `core/aleph/store/vault.py`：Markdown frontmatter 解析与写入（用 `python-frontmatter`）
-- [ ] **T2.3** `core/aleph/store/index.py`：sqlite 索引表（id / title / type / path / refs / updated_at）
-- [ ] **T2.4** Vault 初始化：默认路径 + 目录骨架（people/projects/decisions/...）
-- [ ] **T2.5** Entry 文件命名 slug 规则 + 冲突解决
+- [x] **T2.0a** **Envelope 过滤**：regex 去掉 CC 注入的 `<local-command-caveat>` / `<command-name>` / `<command-message>` / `<command-args>` / `<local-command-stdout>` 五件套块。实现为 `core/filters/envelope.py`，可独立开关。**只过滤 hook capture，不过滤 explicit `remember()`**。
+- [x] **T2.0b** **Turn 切片**：hook capture 从 "整段 transcript tail → 一个 `raw.captured`" 改为按 user/assistant turn 切成多条 `raw.captured`，每条独立 `content_hash` 和 `producer_kind`。实现在 `hooks/_common.py` + `hooks/lifecycle.py`。
 
-#### Aleph 核心 — Pipeline (MVP 版)
-- [ ] **T2.6** `core/llm.py`：Provider 抽象（先实现一个：Anthropic 或 OpenAI）
-- [ ] **T2.7** `core/aleph/prompts/extract.md`：raw → claims/entities prompt 模板
-- [ ] **T2.8** `core/aleph/pipeline/extract.py`：调 LLM，解析输出
-- [ ] **T2.9** `core/aleph/pipeline/route.py`：v0.0.2 简化版 — 仅按 type + 标题相似度匹配 existing entry
-- [ ] **T2.10** v0.0.2 **不实现** merge / crosslink，新 raw 都开新 entry（粗放但可工作）
-- [ ] **T2.11** `core/aleph/api.py`：对内 SDK — `write(raw_batch)` / `search(q)` / `get(ref)`
+#### LLM 基础设施
 
-#### Aleph 核心 — 搜索
-- [ ] **T2.12** `core/aleph/search.py`：v0.0.2 **关键词版本** — 标题 + tags 全文匹配
-- [ ] **T2.13** Embedding 推迟到 v0.0.3（避免提前引入依赖）
+- [x] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `DeepSeekProvider` 实现（OpenAI-compatible API）。统一模型配置（`$ITSME_LLM_MODEL` 默认 `deepseek-chat`，`$DEEPSEEK_API_KEY`）。最小接口：`complete(system, messages) → str`。
 
-#### promoter worker
-- [ ] **T2.14** consolidation 边界监听（消费 `raw.captured` with `source=hook:before-exit`/`hook:before-compact`/`hook:context-pressure`；参见 T1.17/T1.17b）
-- [ ] **T2.15** 拉取本次抢救范围内的 `memory.stored` 列表
-- [ ] **T2.16** 主题聚类：v0.0.2 简化版 — 按 wing/room 分组
-- [ ] **T2.17** 调 `aleph.api.write(raw_batch)` per group
-- [ ] **T2.18** emit `wiki.promoted`
+#### Aleph Extraction Index（轻量 — 不含 wiki / vault）
+
+- [x] **T2.1** `core/aleph/store/index.py`：sqlite schema + FTS5。`extractions` 表（id ULID, turn_id, raw_event_id, summary TEXT, entities JSON, claims JSON, source TEXT, created_at REAL）。`extractions_fts` 虚拟表（summary, entities, claims）。
+- [x] **T2.2** `core/aleph/search.py`：FTS5 关键词搜索 → ranked `ExtractionHit` 列表。v0.0.2 不含 embedding。
+- [x] **T2.3** `core/aleph/api.py`：对内 SDK — `write_extraction(...)` / `search(query, limit)` / `close()`。
+
+#### Intake Pipeline（核心新增）
+
+- [x] **T2.0d** **LLM intake processor**（`core/workers/intake.py`）：
+  - 在 router 异步 consume loop 中运行（不阻塞 hook 进程的 15s 超时）
+  - 消费结构性清洗 + turn 切片后的 `raw.captured` 批次
+  - 一次 LLM 调用，批量处理所有 turn：
+    - keep → 提取 `{summary, entities, claims}`
+    - skip → 标记 `skip_reason`（低信息 / 重复 / boilerplate）
+  - **所有 turn**（keep + skip）→ `MemPalace.write(raw_turn, wing, room)`（全量入库）
+  - **keep turn** 额外 → `Aleph.write_extraction(summary, entities, claims, turn_id)`
+  - **skip turn** → emit `raw.triaged` with `skip_reason`（可观察性，不静默吞）
+  - explicit `remember()` **不走 intake**，保持同步 fast-path
+  - LLM 不可用时**降级**：raw 直存 MemPalace（同 v0.0.1），不写 Aleph，stderr 日志，不阻塞
+  - Intake prompt 模板：`core/aleph/prompts/intake.md`
 
 #### MCP 升级
-- [ ] **T2.19** `ask(mode=auto)` 路由：Aleph 优先 → miss 回退 MemPalace
-- [ ] **T2.20** `ask(mode=wiki)` / `mode=verbatim` 单引擎查询
-- [ ] **T2.21** `sources[]` 字段填充（mp / aleph 双类型）
-- [ ] **T2.22** Hook → promoter 接线：CC 的 SessionEnd / PreCompact / context-pressure 产生的 `raw.captured` 批量喂给 Aleph；Codex 同理
+
+- [x] **T2.19** `ask(mode=auto)` **双引擎搜索**：并行查 `Aleph.search(q)` + `MemPalace.search(q)` → 合并去重（同 `turn_id` / `raw_event_id` 的结果合并为一条，Aleph 命中排前） → 返回。**这是 v0.0.2 的 ask 默认模式**。
+- [x] **T2.20** `ask(mode=verbatim)` MemPalace only（行为不变）。
+- [x] **T2.21** `ask(mode=wiki)` → `NotImplementedError`（wiki entry 在 v0.0.3）。
 
 #### 验收
-- [ ] **T2.23** 一个完整 session：聊 → 退出 → vault 出现新 .md → ask 命中 wiki
-- [ ] **T2.24** 能在 Obsidian 打开 vault，看到 frontmatter + 章节渲染正常
-- [ ] **T2.25** `itsme.hooks._common._iter_transcript_texts` 改成尾部增量读（从 EOF 往回 seek + 按块解析完整 JSONL 行），替换当前 `read_text()` 整文件方案。v0.0.1 transcripts 小，不痛；v0.0.2 接 Aleph promoter 后吞吐变大再优化。
+
+- [x] **T2.23** 端到端：聊一段 → `/exit` → intake 提取 → Aleph index 有记录 + MemPalace 有 per-turn drawer → `ask(mode=auto)` 命中 Aleph 精准 hit + MemPalace 兜底 hit。
+- [x] **T2.24** **Aleph 漏提取回归测试**：构造 LLM intake 未提取的实体（e.g. 一句话中的次要地名），验证 MemPalace raw search 仍能命中。Pin 为 fixture。
+- [x] **T2.25** **LLM 降级测试**：API key 未配 / API 不可用时 hook capture 仍正常存入 MemPalace，`ask(mode=verbatim)` 正常返回，不报错。
+- [x] **T2.26** `status(format=feed)` 能看到 `raw.triaged` 事件（skip/keep 可观察）。
+
+**v0.0.2 完成定义**：hook capture → structural strip → turn slice → LLM intake → Aleph index + MemPalace 双存 → `ask(mode=auto)` 双路搜索命中。LLM 挂了也不丢数据。
 
 ---
 
-## v0.0.3 — 反向升格 + Pipeline 加厚
+## v0.0.3 — Wiki Consolidation + Promoter
 
-**目标**：`ask(promote=true)` 触发即时融合写回；Aleph 学会 merge / crosslink；引入 embedding 搜索。
+**目标**：Aleph 从 per-turn extraction 升级到跨 session wiki consolidation。Promoter 在 session 边界把 extraction index 聚类 → LLM 融合 → wiki entry → Obsidian vault。`ask(promote=true)` 反向升格。引入 embedding 搜索。
 
 ### Tasks
 
-#### Aleph Pipeline — merge / crosslink / refresh
-- [ ] **T3.1** `core/aleph/prompts/merge.md`：老 entry + 新 raw → 更新后的 entry
-- [ ] **T3.2** `core/aleph/pipeline/merge.py`
-- [ ] **T3.3** `core/aleph/pipeline/crosslink.py`：扫描 entry body，自动插入 `[[wikilink]]`
-- [ ] **T3.4** `core/aleph/pipeline/refresh.py`：去重段落、清冗余
-- [ ] **T3.5** route.py 升级：能识别 "应并入 existing entry" vs "应建新 entry"
+#### Aleph Wiki — 数据模型 & 存储
+- [ ] **T3.1** `core/aleph/types.py`：`WikiEntry` / `Claim` / `Reference` 数据类
+- [ ] **T3.2** `core/aleph/store/vault.py`：Markdown frontmatter 解析与写入（用 `python-frontmatter`）
+- [ ] **T3.3** Vault 初始化：默认路径 `~/Documents/itsme/` + 目录骨架（people/projects/decisions/...）
+- [ ] **T3.4** Entry 文件命名 slug 规则 + 冲突解决
+
+#### Aleph Pipeline — consolidation / merge / crosslink
+- [ ] **T3.5** `core/aleph/pipeline/consolidate.py`：从 extraction index 按 entity 聚类 + LLM 融合 → wiki entry
+- [ ] **T3.6** `core/aleph/pipeline/merge.py`：老 entry + 新 extractions → 更新后的 entry
+- [ ] **T3.7** `core/aleph/pipeline/crosslink.py`：扫描 entry body，自动插入 `[[wikilink]]`
+- [ ] **T3.8** `core/aleph/pipeline/refresh.py`：去重段落、清冗余
+
+#### Promoter Worker
+- [ ] **T3.9** promoter worker：session 边界触发（消费 `hook:before-exit` / `hook:before-compact` / `hook:context-pressure`），读 Aleph extraction index → 主题聚类 → LLM consolidation (Sonnet 4.6) → wiki entry → vault
+- [ ] **T3.10** emit `wiki.promoted`
 
 #### Aleph 搜索升级
-- [ ] **T3.6** Embedding provider 抽象（local sentence-transformers / 远程 API 可切）
-- [ ] **T3.7** Body chunking 策略
-- [ ] **T3.8** `core/aleph/search.py` 升级为混合检索（keyword + embedding）
+- [ ] **T3.11** Embedding provider 抽象（local sentence-transformers / 远程 API 可切）
+- [ ] **T3.12** Body chunking 策略
+- [ ] **T3.13** `core/aleph/search.py` 升级为混合检索（FTS5 + embedding）
+- [ ] **T3.14** wiki entry 也进搜索索引
 
 #### `ask(promote=true)`
-- [ ] **T3.9** reader 升级：并行拉 MP + Aleph
-- [ ] **T3.10** `core/aleph/prompts/fuse.md`：老 wiki + 新原料 + 提问视角 → 新 wiki
-- [ ] **T3.11** sync 实现（v0.0.3 默认 sync，参见 Open Q1）
-- [ ] **T3.12** 写回 Aleph + emit `wiki.promoted`
-- [ ] **T3.13** 返回 `promoted=true` + `promotion_event_id`
+- [ ] **T3.15** reader 升级：并行拉 MemPalace + Aleph（extractions + wiki）
+- [ ] **T3.16** `core/aleph/prompts/fuse.md`：老 wiki + 新原料 + 提问视角 → 新 wiki
+- [ ] **T3.17** sync 实现（v0.0.3 默认 sync）
+- [ ] **T3.18** 写回 Aleph + emit `wiki.promoted`
+- [ ] **T3.19** 返回 `promoted=true` + `promotion_event_id`
 
 #### 验收
-- [ ] **T3.14** 同一问题问两次：第二次 wiki 比第一次更精炼
-- [ ] **T3.15** vault 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
+- [ ] **T3.20** 一个完整 session：聊 → 退出 → vault 出现新 .md → Obsidian 可读
+- [ ] **T3.21** 同一问题问两次：第二次 wiki 比第一次更精炼
+- [ ] **T3.22** vault 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
+- [ ] **T3.23** `ask(mode=wiki)` 命中 wiki entry
 
 ---
 
@@ -219,14 +235,27 @@
 
 ---
 
-## Critical Path（v0.0.1）
+## Critical Path（v0.0.2）
 
 ```
-T1.1 ─► T1.5,T1.6 ─► T1.9,T1.10,T1.11,T1.12 ─► T1.13 ─► T1.13.5 ─► T1.15 ─► T1.17,T1.17b ─► T1.20
-        (events)     (MCP surface)               (adapter)  (persist) (router) (CC hooks)      (smoke)
+T2.0a (envelope strip) ─┐
+T2.0b (turn slice)      ─┤── 并行，无 LLM 依赖
+T2.6  (LLM provider)   ─┘
+         │
+         ▼
+T2.1,T2.2,T2.3 (Aleph extraction index + search + API)
+         │
+         ▼
+T2.0d (LLM intake processor) ── 依赖 T2.0a + T2.0b + T2.6 + T2.1-T2.3
+         │
+         ▼
+T2.19 (ask mode=auto 双引擎搜索)
+         │
+         ▼
+T2.23-T2.26 (验收)
 ```
 
-T1.14 / T1.18 (Codex) / T1.21 与主路径并行；其中 T1.18 / T1.21 已于 2026-05-06 下调优先级，待 T2.0a/b/c 收敛后再推进（T1.19 / T1.22 / T1.23 已落地）。
+T2.0a / T2.0b / T2.6 三条线**并行开发**，在 T2.0d 汇合。
 
 **v0.0.1 GA 验收必须满足**：
 

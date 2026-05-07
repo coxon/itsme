@@ -1,25 +1,24 @@
-"""Lifecycle hooks — T1.17.
+"""Lifecycle hooks — T1.17 + T2.0b turn slice.
 
-Handles CC's ``SessionEnd`` and ``PreCompact`` events. Both do the same
-thing: read a bounded tail of the session transcript and append it to
-the events ring as ``raw.captured`` with a hook-specific source label.
-The router's background consume loop picks the captures up and routes
-them to MemPalace.
+Handles CC's ``SessionEnd`` and ``PreCompact`` events. Both read a
+bounded tail of the session transcript and emit **per-turn**
+``raw.captured`` events (T2.0b) — each user or assistant turn becomes
+its own event with an independent ``content_hash``.
 
-Why one function with a ``source`` knob rather than two sibling modules?
-Because the shape of the work is identical — only the attribution
-string differs. A single function keeps the invariant "lifecycle
-triggers salvage a transcript slice" in one place.
+All turns from the same hook fire share a ``capture_batch_id`` so the
+downstream intake worker can batch them into a single LLM call.
 
-For v0.0.1 we copy the slice verbatim into the event payload. v0.0.2
-can switch to a lighter ``transcript_ref`` + small excerpt if storage
-pressure becomes an issue (see ARCHITECTURE §6.2 on hybrid refs).
+For v0.0.1 this emitted one big blob per hook fire. v0.0.2 (T2.0b)
+splits by turn so MemPalace stores ~200-500 token drawers instead of
+a ~2000 token blob, and per-turn Aleph extraction becomes possible.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+from ulid import ULID
 
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventType
@@ -38,56 +37,56 @@ def run_lifecycle_hook(
     source: str,
     max_chars: int = DEFAULT_SNAPSHOT_CHARS,
 ) -> dict[str, Any]:
-    """Emit a transcript tail as ``raw.captured``.
+    """Emit per-turn ``raw.captured`` events from the transcript tail.
 
     Args:
         stdin_text: Raw JSON the CC runtime piped to the hook process.
         bus: Open :class:`EventBus` (caller owns lifecycle).
         source: Event source label — ``"hook:before-exit"`` for
             SessionEnd, ``"hook:before-compact"`` for PreCompact.
-        max_chars: Upper bound on captured text (default 10K).
+        max_chars: Upper bound on total captured text (default 10K).
 
     Returns:
         The CC hook output dict (``continue=True`` always — hooks must
         not block the IDE on capture failures).
     """
-    # Short-circuit before parsing stdin: a disabled user with malformed
-    # CC input would otherwise still see a ValueError surface in stderr.
-    # The CLI already short-circuits earlier, but direct callers (tests,
-    # future router) get the same guarantee here.
     if _common.hooks_disabled():
         return _common.ok_output()
     payload_in = _common.load_hook_input(stdin_text)
 
     transcript_path_raw = payload_in.get("transcript_path")
-    content = ""
-    if isinstance(transcript_path_raw, str) and transcript_path_raw:
-        content = _common.read_transcript_tail(
-            Path(transcript_path_raw),
-            max_chars=max_chars,
-        )
-    if not content.strip():
-        # No transcript text available (empty session, missing file,
-        # or all tool-only turns). Skip the emit — a raw.captured with
-        # empty content would just get dropped by the router's
-        # validation anyway.
+    if not isinstance(transcript_path_raw, str) or not transcript_path_raw:
         return _common.ok_output()
 
-    bus.emit(
-        type=EventType.RAW_CAPTURED,
-        source=source,
-        payload={
-            "content": content,
-            "kind": None,
-            # T1.19: cross-producer dedup keys. The router will skip
-            # this capture if an explicit ``remember()`` (or an earlier
-            # hook fire) already stored exactly the same content.
-            "content_hash": content_hash(content),
-            "producer_kind": producer_kind_from_source(source),
-            "hook_event": payload_in.get("hook_event_name"),
-            "session_id": payload_in.get("session_id"),
-            "transcript_ref": {"path": transcript_path_raw},
-            "cwd": payload_in.get("cwd"),
-        },
+    turns = _common.read_transcript_tail_turns(
+        Path(transcript_path_raw),
+        max_chars=max_chars,
     )
+    if not turns:
+        return _common.ok_output()
+
+    # All turns from this hook fire share a batch id so the intake
+    # worker can group them into a single LLM call.
+    batch_id = str(ULID())
+    producer = producer_kind_from_source(source)
+    session_id = payload_in.get("session_id")
+
+    for turn in turns:
+        bus.emit(
+            type=EventType.RAW_CAPTURED,
+            source=source,
+            payload={
+                "content": turn.text,
+                "kind": None,
+                "turn_role": turn.role,
+                "capture_batch_id": batch_id,
+                "content_hash": content_hash(turn.text),
+                "producer_kind": producer,
+                "hook_event": payload_in.get("hook_event_name"),
+                "session_id": session_id,
+                "transcript_ref": {"path": transcript_path_raw},
+                "cwd": payload_in.get("cwd"),
+            },
+        )
+
     return _common.ok_output()
