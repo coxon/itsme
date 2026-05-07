@@ -138,24 +138,43 @@ class DeepSeekProvider:
             api_messages.append({"role": "system", "content": system})
         api_messages.extend(messages)
 
-        try:
-            response = httpx.post(
-                f"{self._base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._model,
-                    "messages": api_messages,
-                    "max_tokens": max_tokens or self._max_tokens,
-                },
-                timeout=60.0,
-            )
-        except httpx.ConnectError as exc:
-            raise LLMUnavailableError(f"DeepSeek connection failed: {exc}") from exc
-        except httpx.TimeoutException as exc:
-            raise LLMUnavailableError(f"DeepSeek request timed out: {exc}") from exc
+        # Use a client with proxy=None + trust_env=False to bypass macOS
+        # system proxy (Clash TUN + system HTTP proxy causes SSL handshake
+        # failures when httpx tries HTTP CONNECT through the proxy).
+        # trust_env=False prevents httpx from reading HTTP_PROXY/HTTPS_PROXY.
+        # Retry up to 3 times for connection-phase errors only.
+        # ReadTimeout / WriteTimeout are NOT retried — the server may
+        # have already started inference, and DeepSeek has no
+        # idempotency-key support, so retrying would risk duplicate
+        # requests and billing.
+        for attempt in range(3):
+            try:
+                with httpx.Client(proxy=None, trust_env=False, timeout=60.0) as client:
+                    response = client.post(
+                        f"{self._base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {self._api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self._model,
+                            "messages": api_messages,
+                            "max_tokens": max_tokens or self._max_tokens,
+                        },
+                    )
+                break  # success
+            except httpx.ConnectError as exc:
+                if attempt < 2:
+                    import time
+
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise LLMUnavailableError(
+                    f"DeepSeek connection failed after 3 attempts: {exc}"
+                ) from exc
+            except httpx.TimeoutException as exc:
+                # Read/write/pool timeout — do NOT retry.
+                raise LLMUnavailableError(f"DeepSeek request timed out: {exc}") from exc
 
         if response.status_code == 401:
             raise LLMError(f"DeepSeek auth failed (401): {response.text[:200]}")
