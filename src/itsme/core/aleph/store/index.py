@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -164,7 +164,10 @@ class ExtractionIndex:
                     (id, turn_id, raw_event_id, summary, entities, claims, source, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (extraction_id, turn_id, raw_event_id, summary, entities_json, claims_json, source, ts),
+                (
+                    extraction_id, turn_id, raw_event_id, summary,
+                    entities_json, claims_json, source, ts,
+                ),
             )
             self._conn.commit()
 

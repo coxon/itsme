@@ -20,7 +20,7 @@ import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
 from itsme.core.aleph.api import Aleph
-from itsme.core.api import AskResult, Memory
+from itsme.core.api import Memory
 from itsme.core.events import EventBus, EventType
 from itsme.core.llm import StubProvider
 from itsme.core.workers.intake import IntakeProcessor
@@ -139,7 +139,10 @@ class TestT223EndToEnd:
             {
                 "verdict": "keep",
                 "summary": "Planning deployment to AWS us-east-1",
-                "entities": [{"name": "AWS", "type": "company"}, {"name": "us-east-1", "type": "place"}],
+                "entities": [
+                    {"name": "AWS", "type": "company"},
+                    {"name": "us-east-1", "type": "place"},
+                ],
                 "claims": ["Deploy to AWS us-east-1"],
             },
             {"verdict": "skip", "skip_reason": "procedural acknowledgment"},

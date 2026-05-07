@@ -127,7 +127,7 @@ class IntakeProcessor:
 
         # Step 2: Write all turns to MemPalace + Aleph, emit triaged
         results: list[IntakeResult] = []
-        for event, extraction in zip(events, extractions):
+        for event, extraction in zip(events, extractions, strict=False):
             result = self._write_and_emit(event, extraction)
             results.append(result)
 

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from itsme.core.filters.envelope import has_envelopes, strip_envelopes
-
 
 # ---------------------------------------------------------------- basic cases
 
@@ -46,7 +43,10 @@ class TestStripEnvelopes:
         assert result == "real content"
 
     def test_local_command_stdout(self) -> None:
-        text = "prefix\n<local-command-stdout>\nstdout line 1\nline 2\n</local-command-stdout>\nsuffix"
+        text = (
+            "prefix\n<local-command-stdout>\nstdout line 1\n"
+            "line 2\n</local-command-stdout>\nsuffix"
+        )
         result = strip_envelopes(text)
         assert "stdout" not in result
         assert "prefix" in result

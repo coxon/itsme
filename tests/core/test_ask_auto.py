@@ -97,7 +97,6 @@ class TestAskAuto:
         # Should not see duplicate entries for the same drawer
         refs = [s.ref for s in result.sources]
         aleph_refs = [r for r in refs if r.startswith("aleph:")]
-        mp_refs = [r for r in refs if r.startswith("mempalace:")]
         # Aleph hit is present
         assert len(aleph_refs) >= 1
 

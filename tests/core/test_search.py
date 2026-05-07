@@ -13,13 +13,12 @@ Verifies:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
 from itsme.core.aleph.api import Aleph
-from itsme.core.search import SearchHit, dual_search, _normalize_fts5_rank
+from itsme.core.search import _normalize_fts5_rank, dual_search
 
 
 @pytest.fixture
@@ -40,7 +39,14 @@ def _write_mp(adapter: InMemoryMemPalaceAdapter, content: str) -> str:
     return res.drawer_id
 
 
-def _write_aleph(aleph: Aleph, summary: str, *, turn_id: str = "", entities: list | None = None, claims: list | None = None) -> str:
+def _write_aleph(
+    aleph: Aleph,
+    summary: str,
+    *,
+    turn_id: str = "",
+    entities: list | None = None,
+    claims: list | None = None,
+) -> str:
     """Write to Aleph and return extraction_id."""
     ext = aleph.write_extraction(
         turn_id=turn_id,
@@ -117,7 +123,7 @@ class TestDualSearch:
 
         # Same drawer_id should NOT appear twice
         drawer_ids = [h.drawer_id for h in hits if h.drawer_id]
-        unique_ids = set(drawer_ids)
+        assert len(set(drawer_ids)) == len(drawer_ids)
         # Aleph hit takes priority, MemPalace skipped for this drawer
         aleph_hits = [h for h in hits if h.kind == "extraction"]
         assert len(aleph_hits) >= 1
@@ -255,10 +261,10 @@ class TestSearchHitStructure:
 
     def test_ref_format(self, adapter, aleph) -> None:
         """Refs follow the expected format."""
-        drawer_id = _write_mp(adapter, "Ref format test content")
-        ext_id = _write_aleph(aleph, "Ref format extraction",
-                              turn_id="d-ref",
-                              claims=["ref test"])
+        _write_mp(adapter, "Ref format test content")
+        _write_aleph(aleph, "Ref format extraction",
+                     turn_id="d-ref",
+                     claims=["ref test"])
 
         hits = dual_search("ref format", adapter=adapter, aleph=aleph,
                            wing="wing_test", limit=5)
