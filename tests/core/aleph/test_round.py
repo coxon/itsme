@@ -404,3 +404,46 @@ class TestParseRoundResponse:
     def test_markdown_fences_stripped(self) -> None:
         ops = _parse_round_response('```json\n[{"action": "update", "slug": "x"}]\n```')
         assert len(ops) == 1
+
+    def test_empty_slug_rejected(self) -> None:
+        """Create with empty slug is rejected."""
+        ops = _parse_round_response(
+            json.dumps(
+                [
+                    {
+                        "action": "create",
+                        "slug": "",
+                        "domain": "technology",
+                        "subcategory": "ai",
+                        "type": "concept",
+                        "title": "Empty Slug",
+                    }
+                ]
+            )
+        )
+        assert len(ops) == 0
+
+    def test_whitespace_only_slug_rejected(self) -> None:
+        ops = _parse_round_response(
+            json.dumps([{"action": "update", "slug": "   "}])
+        )
+        assert len(ops) == 0
+
+    def test_non_list_related_rejected(self) -> None:
+        """related field as string instead of list is rejected."""
+        ops = _parse_round_response(
+            json.dumps(
+                [
+                    {
+                        "action": "create",
+                        "slug": "test",
+                        "domain": "technology",
+                        "subcategory": "ai",
+                        "type": "concept",
+                        "title": "Test",
+                        "related": "not-a-list",
+                    }
+                ]
+            )
+        )
+        assert len(ops) == 0

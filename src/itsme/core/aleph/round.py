@@ -128,12 +128,15 @@ class AlephRound:
                 if action == "create":
                     self._execute_create(op, today)
                     result.pages_created += 1
-                    new_index_entries.append(self._make_index_entry_from_page(op["slug"], today))
+                    idx_entry = self._make_index_entry_from_page(op["slug"], today)
+                    if idx_entry is not None:
+                        new_index_entries.append(idx_entry)
                 elif action == "update":
                     self._execute_update(op, today)
                     result.pages_updated += 1
-                    # Always refresh index entry after update (uses actual page meta)
-                    new_index_entries.append(self._make_index_entry_from_page(op["slug"], today))
+                    idx_entry = self._make_index_entry_from_page(op["slug"], today)
+                    if idx_entry is not None:
+                        new_index_entries.append(idx_entry)
                 else:
                     _logger.warning("aleph round: unknown action %r, skipping", action)
                     result.pages_skipped += 1
@@ -155,11 +158,15 @@ class AlephRound:
         if result.pages_updated:
             summary_parts.append(f"更新 {result.pages_updated} 页")
         if summary_parts:
-            self._vault.append_log(
-                action="INGEST",
-                source="itsme:aleph-round",
-                summary="，".join(summary_parts),
-            )
+            try:
+                self._vault.append_log(
+                    action="INGEST",
+                    source="itsme:aleph-round",
+                    summary="，".join(summary_parts),
+                )
+            except Exception as exc:
+                _logger.error("aleph round: log append failed: %s", exc)
+                result.errors.append(f"log_error: {exc}")
 
         return result
 
@@ -256,23 +263,20 @@ class AlephRound:
             append_history=op.get("history_entry", f"- {today} 更新，来源: itsme intake"),
         )
 
-    def _make_index_entry_from_page(self, slug: str, today: str) -> IndexEntry:
-        """Build an IndexEntry from actual page metadata (not raw LLM op)."""
+    def _make_index_entry_from_page(self, slug: str, today: str) -> IndexEntry | None:
+        """Build an IndexEntry from actual page metadata (not raw LLM op).
+
+        Returns None if the page is not found (caller should skip upsert).
+        """
         meta = self._vault.find_page(slug)
-        if meta is not None:
-            return IndexEntry(
-                page_link=f"[[{slug}]]",
-                type=meta.type,
-                wing_sub=f"{meta.domain} / {meta.subcategory}",
-                summary=meta.summary,
-                date=today,
-            )
-        # Fallback if page somehow not found (shouldn't happen after create/update)
+        if meta is None:
+            _logger.warning("aleph round: page %r not found for index entry, skipping", slug)
+            return None
         return IndexEntry(
             page_link=f"[[{slug}]]",
-            type="",
-            wing_sub="",
-            summary="",
+            type=meta.type,
+            wing_sub=f"{meta.domain} / {meta.subcategory}",
+            summary=meta.summary,
             date=today,
         )
 
@@ -309,10 +313,20 @@ def _parse_round_response(raw: str) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         action = item.get("action", "")
+
         required_create = ("slug", "domain", "subcategory", "type", "title")
-        is_valid_create = action == "create" and all(k in item for k in required_create)
-        is_valid_update = action == "update" and "slug" in item
-        if is_valid_create or is_valid_update:
+        is_valid_create = action == "create" and all(
+            isinstance(item.get(k), str) and bool(item[k].strip()) for k in required_create
+        )
+        is_valid_update = action == "update" and isinstance(item.get("slug"), str) and bool(
+            item["slug"].strip()
+        )
+
+        # Optional list fields must be lists if present
+        list_keys = ("related", "add_sources", "add_related")
+        lists_ok = all(isinstance(item[k], list) for k in list_keys if k in item)
+
+        if (is_valid_create or is_valid_update) and lists_ok:
             valid.append(item)
         else:
             _logger.warning("aleph round: skipping malformed operation: %s", item)

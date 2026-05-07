@@ -494,7 +494,12 @@ class TestIndexSanitization:
             ]
         )
         text = (vault.root / "index.md").read_text()
-        # No raw newlines inside a table row
-        for line in text.split("\n"):
+        # Find the table row containing [[test]] and verify newlines were collapsed
+        for line in text.splitlines():
             if "[[test]]" in line:
-                assert "\n" not in line.strip()
+                assert "line1" in line
+                assert "line2" in line
+                # Both parts on one line = newline was collapsed
+                break
+        else:
+            pytest.fail("Could not find [[test]] row in index.md")
