@@ -21,13 +21,13 @@
 - ✅ 多 IDE：**先支持 CC + Codex**，安装方式分别打包
 - ✅ 仓库管理：**简化 gitflow**（main + feature/*；squash merge；1.0 后再升级到完整 git-flow，见 CONTRIBUTING.md）
 - ✅ 包布局：**src-layout**（`src/itsme/`，避免与 MCP SDK 命名冲突，见 ARCHITECTURE §9）
-- ✅ Vault 默认路径：`~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
+- ✅ Vault 默认路径：`~/Documents/Aleph/`（Obsidian vault，Apple iCloud 同步，Karpathy llm-wiki 模式）。`$ITSME_ALEPH_VAULT` 可覆盖。无 vault 时降级（不报错，不写 wiki，不搜 wiki）
 - ✅ MemPalace 适配：**Protocol + InMemory 参考实现**（`core/adapters/mempalace.py`）+ **stdio MCP-client backend 已落地**（`core/adapters/mempalace_stdio.py`，T1.13.5，v0.0.1 GA），由 `$ITSME_MEMPALACE_BACKEND={inmemory,stdio,auto}` 切换
 - ✅ MCP server 框架：**FastMCP + stdio**（mcp Python SDK 1.27+）
 - ✅ Router 策略：v0.0.1 **规则路由** — `kind` 直查 + 关键词推断（decision/todo/feeling/event）+ fallback general，**不引入 LLM**；LLM 路由推迟到 v0.0.2 配合 promoter 一并落地
 - ✅ LLM 模型：统一用 **DeepSeek**（`deepseek-chat`，`$ITSME_LLM_MODEL` 可覆盖）；API key 通过 `$DEEPSEEK_API_KEY` 配置
-- ✅ Aleph v0.0.2 形态：**per-turn extraction index**（sqlite + FTS5），不含 wiki consolidation / vault 写入 / merge / crosslink。完整 Aleph pipeline 推迟到 v0.0.3
-- ✅ ask 搜索策略：**双引擎并行**（Aleph structured + MemPalace raw）→ 合并去重返回。结构化层是**搜索增强器，不是替代器**——LLM 提取遗漏时 MemPalace raw 兜底，永远不漏
+- ✅ Aleph v0.0.2 形态：**三层存储** — (1) MemPalace ChromaDB（raw per-turn），(2) SQLite FTS5 extraction index（per-turn 结构化搜索加速），(3) Obsidian vault wiki（跨 session 聚合知识条目，`~/Documents/Aleph/`，iCloud 同步）。数据流：intake → MemPalace + extraction index → AlephRound → Obsidian vault。完整 wiki pipeline 已在 v0.0.2 落地，非推迟到 v0.0.3
+- ✅ ask 搜索策略：**三引擎并行**（Vault wiki 条目 + Aleph structured extraction + MemPalace raw）→ 合并去重返回。Vault 命中排前（聚合知识），extraction 居中（per-turn 结构化），MemPalace 兜底（raw 全文）。LLM 提取遗漏时 MemPalace raw 兜底，永远不漏
 - ✅ Intake 运行位置：**router 异步 consume loop**（不阻塞 hook 进程）；explicit `remember()` 不走 intake，保持同步 fast-path
 - ✅ LLM 降级策略：API 不可用时 raw 直存 MemPalace（同 v0.0.1 行为），不写 Aleph，不阻塞
 
@@ -37,9 +37,9 @@
 
 | 版本 | 主题 | 关键交付 | 估算 |
 |---|---|---|---|
-| **v0.0.1** | 端到端骨架 | hook → events → router → MemPalace → ask 直查 MP，能装进 CC | ~1.5 周 |
-| **v0.0.2** | Intake + Aleph Index | LLM intake → per-turn extraction index + MemPalace raw → `ask(mode=auto)` 双引擎搜索 | ~3-4 周 |
-| **v0.0.3** | Wiki Consolidation | promoter → wiki entry → vault；embedding 搜索；`ask(promote=true)` 反向升格；merge / crosslink | ~3-4 周 |
+| **v0.0.1** | 端到端骨架 | hook → events → router → MemPalace → ask 直查 MP，能装进 CC | ✅ |
+| **v0.0.2** | Intake + Aleph + Vault | LLM intake → per-turn extraction + MemPalace raw + Obsidian vault wiki → `ask(mode=auto)` 三引擎搜索 + `ask(mode=wiki)` | ✅ |
+| **v0.0.3** | 打磨 + Embedding | 双 Aleph 清理、crosslink、embedding 混合检索、`ask(promote=true)` | ~2-3 周 |
 | **v0.0.4** | Curator + 体验 | 去重、KG 失效、skill 文档完整、status feed 渲染 | ~1.5 周 |
 | **v0.0.5+** | 长尾 | 跨 session 主题聚类、主动召回、KG 推理、用户笔记区块契约 | — |
 
@@ -138,9 +138,17 @@
 
 #### MCP 升级
 
-- [x] **T2.19** `ask(mode=auto)` **双引擎搜索**：并行查 `Aleph.search(q)` + `MemPalace.search(q)` → 合并去重（同 `turn_id` / `raw_event_id` 的结果合并为一条，Aleph 命中排前） → 返回。**这是 v0.0.2 的 ask 默认模式**。
+- [x] **T2.19** `ask(mode=auto)` **三引擎搜索**：并行查 `Vault.search(q)` (wiki 条目) + `Aleph.search(q)` (per-turn extraction) + `MemPalace.search(q)` (raw) → 合并去重，wiki 命中排前 → 返回。**这是 v0.0.2 的 ask 默认模式**。
 - [x] **T2.20** `ask(mode=verbatim)` MemPalace only（行为不变）。
-- [x] **T2.21** `ask(mode=wiki)` → `NotImplementedError`（wiki entry 在 v0.0.3）。
+- [x] **T2.21** `ask(mode=wiki)` Obsidian vault 页面搜索（已实现，非 NotImplementedError）。
+
+#### Obsidian Vault 接通
+
+- [x] **T2.27** `core/aleph/vault.py`：AlephVault — Obsidian vault 读写适配器（dna.md/index.md/log.md/wings）。数据类：`PageMeta` / `PageHit` / `IndexEntry`。YAML frontmatter 解析与渲染。路径安全（traversal 防护 + 全局 slug 唯一）。
+- [x] **T2.28** `core/aleph/round.py`：AlephRound — LLM 驱动的对话→wiki 页面 create/update。prompt 在 `core/aleph/prompts/round.md`。解析健壮：空数组 / markdown fenced / 畸形 op / 值类型检查。
+- [x] **T2.29** **Pipeline 接通**：IntakeProcessor 接受 `vault` 参数，batch 完成后自动触发 AlephRound。kept turns（且 drawer_id 成功）→ vault create/update。`wiki.promoted` 事件发射。
+- [x] **T2.30** **Vault 自动发现**：`$ITSME_ALEPH_VAULT` 或 `~/Documents/Aleph/`。`build_default_memory` 自动发现并传入。无 vault 时降级（不报错）。
+- [x] **T2.31** **真实烟测**：DeepSeek + `~/Documents/Aleph/` 临时副本。中文对话 → intake 2 kept / 1 skipped → vault 新建 2 页 → `ask(mode=wiki)` 命中 → `ask(mode=auto)` 三引擎融合命中。全链路端到端通过。
 
 #### 验收
 
@@ -149,50 +157,48 @@
 - [x] **T2.25** **LLM 降级测试**：API key 未配 / API 不可用时 hook capture 仍正常存入 MemPalace，`ask(mode=verbatim)` 正常返回，不报错。
 - [x] **T2.26** `status(format=feed)` 能看到 `raw.triaged` 事件（skip/keep 可观察）。
 
-**v0.0.2 完成定义**：hook capture → structural strip → turn slice → LLM intake → Aleph index + MemPalace 双存 → `ask(mode=auto)` 双路搜索命中。LLM 挂了也不丢数据。
+**v0.0.2 完成定义**：hook capture → structural strip → turn slice → LLM intake → Aleph index + MemPalace 双存 + Obsidian vault wiki 页面 → `ask(mode=auto)` 三路搜索命中 → `ask(mode=wiki)` vault 页面搜索。LLM 挂了也不丢数据。
 
 ---
 
-## v0.0.3 — Wiki Consolidation + Promoter
+## v0.0.3 — Consolidation 打磨 + Embedding 搜索
 
-**目标**：Aleph 从 per-turn extraction 升级到跨 session wiki consolidation。Promoter 在 session 边界把 extraction index 聚类 → LLM 融合 → wiki entry → Obsidian vault。`ask(promote=true)` 反向升格。引入 embedding 搜索。
+**目标**：清理双 Aleph 架构（SQLite index → 降级为可选缓存层），vault 成为搜索主力。引入 embedding 混合检索。`ask(promote=true)` 反向升格。crosslink 回填。
+
+> **架构决策（2026-05-07）**：Aleph ≠ SQLite 内部 index。Aleph = Obsidian vault（`~/Documents/Aleph/`），Apple iCloud 同步，Karpathy llm-wiki 模式。SQLite FTS5 index 降级为 per-turn 搜索加速层（可选），vault 是 source of truth。
 
 ### Tasks
 
-#### Aleph Wiki — 数据模型 & 存储
-- [ ] **T3.1** `core/aleph/types.py`：`WikiEntry` / `Claim` / `Reference` 数据类
-- [ ] **T3.2** `core/aleph/store/vault.py`：Markdown frontmatter 解析与写入（用 `python-frontmatter`）
-- [ ] **T3.3** Vault 初始化：默认路径 `~/Documents/itsme/` + 目录骨架（people/projects/decisions/...）
-- [ ] **T3.4** Entry 文件命名 slug 规则 + 冲突解决
+#### 双 Aleph 清理
 
-#### Aleph Pipeline — consolidation / merge / crosslink
-- [ ] **T3.5** `core/aleph/pipeline/consolidate.py`：从 extraction index 按 entity 聚类 + LLM 融合 → wiki entry
-- [ ] **T3.6** `core/aleph/pipeline/merge.py`：老 entry + 新 extractions → 更新后的 entry
-- [ ] **T3.7** `core/aleph/pipeline/crosslink.py`：扫描 entry body，自动插入 `[[wikilink]]`
-- [ ] **T3.8** `core/aleph/pipeline/refresh.py`：去重段落、清冗余
+- [ ] **T3.0** **厘清 SQLite index 角色**：`core/aleph/store/index.py` (per-turn extraction) 与 `core/aleph/vault.py` (Obsidian wiki) 并存。明确：vault = 长期知识层（source of truth），index = 短期搜索加速层（可选、可重建）。`dual_search` 中 vault 已排在 index 前面。
+- [ ] **T3.0b** **可选**：若 vault 搜索覆盖度足够，砍掉 SQLite index，减少一次 LLM 调用（intake extraction）+ 一套存储。需要 benchmark vault search vs FTS5 precision。
 
-#### Promoter Worker
-- [ ] **T3.9** promoter worker：session 边界触发（消费 `hook:before-exit` / `hook:before-compact` / `hook:context-pressure`），读 Aleph extraction index → 主题聚类 → LLM consolidation (Sonnet 4.6) → wiki entry → vault
-- [ ] **T3.10** emit `wiki.promoted`
+#### Crosslink & 自成长
 
-#### Aleph 搜索升级
+- [ ] **T3.7** `core/aleph/pipeline/crosslink.py`：全量扫描 vault body，自动插入 `[[wikilink]]`（目前 LLM 在 round prompt 中生成 `related: [[...]]`，但没有回填已有页面的 body 引用）
+- [ ] **T3.8** `core/aleph/pipeline/refresh.py`：去重段落、清冗余（同一实体从多个 session 写入可能产生重复段落）
+
+#### Embedding 搜索升级
+
 - [ ] **T3.11** Embedding provider 抽象（local sentence-transformers / 远程 API 可切）
-- [ ] **T3.12** Body chunking 策略
-- [ ] **T3.13** `core/aleph/search.py` 升级为混合检索（FTS5 + embedding）
-- [ ] **T3.14** wiki entry 也进搜索索引
+- [ ] **T3.12** Body chunking 策略（vault 页面按 section 切块）
+- [ ] **T3.13** Vault 页面 + MemPalace drawer → embedding index（混合检索：keyword + vector）
+- [ ] **T3.14** `ask(mode=auto)` 升级为 keyword + embedding 混合排序
 
 #### `ask(promote=true)`
-- [ ] **T3.15** reader 升级：并行拉 MemPalace + Aleph（extractions + wiki）
+
+- [ ] **T3.15** reader 升级：并行拉 MemPalace + vault + extraction index
 - [ ] **T3.16** `core/aleph/prompts/fuse.md`：老 wiki + 新原料 + 提问视角 → 新 wiki
 - [ ] **T3.17** sync 实现（v0.0.3 默认 sync）
-- [ ] **T3.18** 写回 Aleph + emit `wiki.promoted`
+- [ ] **T3.18** 写回 vault + emit `wiki.promoted`
 - [ ] **T3.19** 返回 `promoted=true` + `promotion_event_id`
 
 #### 验收
-- [ ] **T3.20** 一个完整 session：聊 → 退出 → vault 出现新 .md → Obsidian 可读
-- [ ] **T3.21** 同一问题问两次：第二次 wiki 比第一次更精炼
+
+- [ ] **T3.21** 同一问题问两次：第二次 wiki 比第一次更精炼（promote 效果）
 - [ ] **T3.22** vault 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
-- [ ] **T3.23** `ask(mode=wiki)` 命中 wiki entry
+- [ ] **T3.24** embedding 搜索比 keyword-only 精度提升（中文长查询 benchmark）
 
 ---
 
@@ -235,27 +241,25 @@
 
 ---
 
-## Critical Path（v0.0.2）
+## Critical Path（v0.0.3）
 
 ```
-T2.0a (envelope strip) ─┐
-T2.0b (turn slice)      ─┤── 并行，无 LLM 依赖
-T2.6  (LLM provider)   ─┘
-         │
-         ▼
-T2.1,T2.2,T2.3 (Aleph extraction index + search + API)
-         │
-         ▼
-T2.0d (LLM intake processor) ── 依赖 T2.0a + T2.0b + T2.6 + T2.1-T2.3
-         │
-         ▼
-T2.19 (ask mode=auto 双引擎搜索)
-         │
-         ▼
-T2.23-T2.26 (验收)
+T3.0  (双 Aleph 角色厘清)
+  │
+  ▼
+T3.7,T3.8 (crosslink + refresh)
+  │
+  ▼
+T3.11-T3.14 (embedding 搜索)
+  │
+  ▼
+T3.15-T3.19 (ask promote=true)
+  │
+  ▼
+T3.21-T3.24 (验收)
 ```
 
-T2.0a / T2.0b / T2.6 三条线**并行开发**，在 T2.0d 汇合。
+T3.0 先行（决定 SQLite index 保留/砍掉 影响后续所有搜索改动），然后三条线可交叉。
 
 **v0.0.1 GA 验收必须满足**：
 
@@ -274,7 +278,7 @@ T2.0a / T2.0b / T2.6 三条线**并行开发**，在 T2.0d 汇合。
 - [x] **Q4** LLM provider → **Anthropic**（先支持，留抽象层）
 - [x] **Q5** Embedding → **本地 sentence-transformers**（v0.0.3）
 - [x] **Q6** Hook 触发 → **被动 lifecycle**（SessionEnd=before-exit / PreCompact=before-compact）+ **主动 context-pressure 1 个**（阈值采样，Schmitt-trigger debounce；T1.17b）。CC 无专门的 `/clear` hook，交由 context-pressure 覆盖提前抢救需求。
-- [x] **Q7** Vault 默认路径 → `~/Documents/itsme/`（与现有 `~/Documents/Aleph/` 同级）
+- [x] **Q7** Vault 默认路径 → `~/Documents/Aleph/`（Obsidian vault，iCloud 同步）
 - [x] **Q8** Plugin 安装 → **CC + Codex 双套**，分别按各自规范打包
 
 全部已敲定 ✅
