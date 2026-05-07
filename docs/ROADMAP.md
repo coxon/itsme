@@ -39,9 +39,9 @@
 |---|---|---|---|
 | **v0.0.1** | 端到端骨架 | hook → events → router → MemPalace → ask 直查 MP，能装进 CC | ✅ |
 | **v0.0.2** | Intake + Aleph Wiki | LLM intake → MemPalace raw + AlephRound → Obsidian wiki 页面 → `ask(mode=auto)` 双引擎搜索 + `ask(mode=wiki)` | ✅ |
-| **v0.0.3** | 打磨 + Embedding | crosslink 回填、refresh 去重、embedding 混合检索 | ~2-3 周 |
-| **v0.0.4** | Curator + 体验 | 去重、KG 失效、skill 文档完整、status feed 渲染 | ~1.5 周 |
-| **v0.0.5+** | 长尾 | 跨 session 主题聚类、主动召回、KG 推理、用户笔记区块契约 | — |
+| **v0.0.3** | Search 打磨 + Embedding | CJK search 修复、wiki embedding via MemPalace、score 修复、mempalace 可选依赖 | ✅ |
+| **v0.0.4** | Crosslink + Curator + 体验 | wiki crosslink 回填、refresh 去重、curator、skill 文档、status feed 渲染 | ~2 周 |
+| **v0.0.5+** | 长尾 | 跨 session 主题聚类、主动召回、KG 推理 | — |
 
 > **🎨 Icon track（平行路线）**：图标资产按 phase I1 / I2 / I3 / I4 分别挂在 v0.0.1 / v0.0.2 / v0.0.4 / v0.1+ 上一起发布。详见 [docs/ICONS.md](./ICONS.md)。
 
@@ -163,9 +163,9 @@
 
 ## v0.0.3 — Search 打磨 + Embedding
 
-**目标**：wiki 搜索质量提升（crosslink、refresh、CJK 已修）。引入 embedding 混合检索提升 wiki 搜索精度。
+**目标**：wiki 搜索质量提升（CJK 修复）。引入 embedding 混合检索提升 wiki 搜索召回。score 归一化修复。mempalace 可选依赖。
 
-> **架构现状（2026-05-07）**：SQLite FTS5 extraction index 已在 T3.0 移除。Aleph = Obsidian wiki（`~/Documents/Aleph/`），source of truth。搜索 = wiki keyword + MemPalace embedding（ChromaDB），双引擎。`ask(promote=true)` dropped — 写时 AlephRound 已聚合，读时 Claude 自然综合。
+> **架构现状（2026-05-07）**：SQLite FTS5 extraction index 已在 T3.0 移除。Aleph = Obsidian wiki（`~/Documents/Aleph/`），source of truth。搜索 = 三条腿：wiki keyword + wiki embedding (via MemPalace `aleph` wing) + MemPalace raw（ChromaDB）。`ask(promote=true)` dropped — 写时 AlephRound 已聚合，读时 Claude 自然综合。
 
 ### Tasks
 
@@ -174,40 +174,49 @@
 - [x] **T3.0** **SQLite index 移除**：`core/aleph/store/index.py` 及相关代码已删除。wiki 页面 + MemPalace raw 双引擎覆盖原 per-turn extraction 用例。`dual_search` → `wiki_search` + `MemPalace.search`。
 - [x] **T3.0b** 确认 vault 搜索覆盖度足够，砍掉 SQLite index + 一次 LLM 调用（intake extraction 简化为 keep/skip 判定 + wiki round）。
 
-#### Crosslink & 自成长
+#### CJK Search 修复（#28）
 
-- [ ] **T3.7** `core/aleph/pipeline/crosslink.py`：全量扫描 wiki body，自动插入 `[[wikilink]]`（目前 LLM 在 round prompt 中生成 `related: [[...]]`，但没有回填已有页面的 body 引用）
-- [ ] **T3.8** `core/aleph/pipeline/refresh.py`：去重段落、清冗余（同一实体从多个 session 写入可能产生重复段落）
+- [x] **T3.8** **CJK wiki keyword search**：`wiki.py:search()` 原 `query.lower().split()` 把整段中文吞成单 token，导致不命中。改为 `_search_tokens()` — CJK 字符逐字切分 + Latin 整 token 混合。9 个 CJK 测试覆盖：中文标题/摘要/正文/别名、混合中英、日文平假名、排序。
 
-#### Embedding 搜索升级
+#### Wiki Embedding via MemPalace（#30）
 
-> **注意**：MemPalace stdio 后端已内置 ChromaDB embedding 搜索。以下主要针对 Aleph wiki 页面搜索（目前仅 keyword）。
+> **方案**：不独立引入 embedding provider，复用 MemPalace ChromaDB 的 embedding 能力。Wiki pages 同步到 MemPalace `aleph` wing，`dual_search` 增加 embedding 搜索腿。
 
-- [ ] **T3.11** Embedding provider 抽象（local sentence-transformers / 远程 API 可切）
-- [ ] **T3.12** Body chunking 策略（wiki 页面按 section 切块）
-- [ ] **T3.13** Wiki 页面 → embedding index（混合检索：keyword + vector）
-- [ ] **T3.14** `ask(mode=auto)` 升级为 keyword + embedding 混合排序
+- [x] **T3.11** **Wiki embedding sync**：`IntakeProcessor._sync_wiki_embeddings(slugs)` — AlephRound 成功后把受影响的 wiki pages 写入 MemPalace（`wing="aleph"`, `room="room_wiki"`）。内容格式：`title + summary + body`，给 embedding 模型完整上下文。`sync_all_wiki_pages()` 启动时 bootstrap 全量同步。
+- [x] **T3.12** **命名空间隔离**：`adapters/naming.py` 新增 `WIKI_WING = "aleph"` / `WIKI_ROOM = "room_wiki"`，wiki embedding 与项目 raw 搜索隔离。
+- [x] **T3.13** **三条腿搜索**：`search.py:dual_search()` 重写为三腿合并：① Aleph keyword → ② MemPalace embedding (`wing=aleph`) → ③ MemPalace raw (`wing=wing_<project>`)。content[:100] 去重防止 keyword + embedding 同一页面重复占位。
+- [x] **T3.14** **启动 bootstrap**：`Memory.__init__` 调用 `sync_all_wiki_pages()` 索引现有页面。13 个测试覆盖：content formatting、sync plumbing、dual_search embedding、Memory startup、ask integration。
 
-#### ~~`ask(promote=true)`~~ — dropped
+#### Score 修复 + mempalace 可选依赖（#31）
 
-> **2026-05-07 决定 drop**：intake→AlephRound 已在写时聚合知识到 wiki 页面。Claude 在读时自然综合 wiki + MemPalace 多源结果。再加一层"读时 LLM 融合"是双重 LLM 调用，成本高且无附加价值。
+- [x] **T3.20** **Score 归一化**：`mempalace_stdio.py` 处理 MemPalace v3.3+ BM25-only 模式返回 `None` similarity + 旧版 v3.0.x 负值 similarity。
+- [x] **T3.21** **mempalace 可选依赖**：`pyproject.toml` 新增 `[project.optional-dependencies] mempalace = ["mempalace>=3.0"]`。`pip install itsme[mempalace]` 后 `python3 -m mempalace.mcp_server` 直接可用，无需 `ITSME_MEMPALACE_COMMAND` 指定系统 python 路径。cross-restart 测试翻转为 happy path。
 
-- ~~T3.15–T3.19~~：不再实施
+#### ARCHITECTURE.md 重写（#32）
+
+- [x] **T3.23** ARCHITECTURE.md 全面重写：删除不存在的 promoter/curator/FTS5/promote=true，更新为 2 workers (router+intake)、Aleph 实际模块结构 (wiki.py+round.py+prompts/)、vault 实际布局、三条腿搜索、环境变量表。
 
 #### 验收
 
-- [ ] **T3.22** wiki 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
-- [ ] **T3.24** embedding 搜索比 keyword-only 精度提升（中文长查询 benchmark）
+- [x] **T3.24** **Embedding 搜索验证**：通过 `Memory.ask(mode='auto')` 验证真实 Aleph wiki（31 pages）的三条腿搜索。"海龙" → `wiki:hai-long` (score 0.6)、"产品设计" → starmap-agent-react + starmap。Embedding 腿需 `mempalace repair` 重建 cosine 索引后完全发挥作用。
+
+**v0.0.3 完成定义** ✅：CJK search 修复 → wiki embedding 搜索 → score 归一化 → mempalace 可选依赖 → ARCHITECTURE.md 与现实同步。483 tests passing。
 
 ---
 
-## v0.0.4 — Curator + Skill 与体验打磨
+## v0.0.4 — Crosslink + Curator + 体验打磨
 
-**目标**：去重失效跑起来；agent 真的"用得好" itsme，而不是"能调用" itsme。
+**目标**：wiki 自成长（crosslink 回填、refresh 去重）；去重失效跑起来；agent 真的"用得好" itsme。
 
 ### Tasks
 
-#### curator
+#### Crosslink & 自成长（从 v0.0.3 推迟）
+
+- [ ] **T4.0** `core/aleph/pipeline/crosslink.py`：全量扫描 wiki body，自动插入 `[[wikilink]]`（目前 LLM 在 round prompt 中生成 `related: [[...]]`，但没有回填已有页面的 body 引用）
+- [ ] **T4.0b** `core/aleph/pipeline/refresh.py`：去重段落、清冗余（同一实体从多个 session 写入可能产生重复段落）
+- [ ] **T4.0c** 验收：wiki 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
+
+#### Curator
 - [ ] **T4.1** 定时任务调度（每 N 分钟 / 每 session 末）
 - [ ] **T4.2** 重复检测（依赖 MemPalace 已有 `check_duplicate`）
 - [ ] **T4.3** 失效模式识别（"我搬家了" / "项目结束了" 类语义）
@@ -240,29 +249,29 @@
 
 ---
 
-## Critical Path（v0.0.3）
+## Critical Path（v0.0.4）
 
 ```
-T3.0,T3.0b (SQLite index 移除) ✅ done
+T4.0,T4.0b (crosslink + refresh)   ← wiki 自成长
   │
   ▼
-T3.7,T3.8 (crosslink + refresh)   ← 无外部依赖，可独立推进
+T4.1-T4.6 (curator)                ← 去重 / 失效
   │
   ▼
-T3.11-T3.14 (embedding 搜索)      ← wiki 页面 + embedding 混合检索
+T4.7-T4.9 (skill docs)             ← agent 用得好
   │
   ▼
-T3.22,T3.24 (验收)
+T4.10-T4.14 (体验打磨)
 ```
 
-T3.7/T3.8 与 T3.11-14 两条线可交叉并行。
+T4.0/T4.0b 与 T4.1-T4.6 两条线可交叉并行。
 
 **v0.0.1 GA 验收必须满足**：
 
 - 三动词 (`remember` / `ask` / `status`) 在 CC 里走通；
 - T1.20 smoke（自动 + 手动 runbook）全绿；
 - T1.13.5 持久化 backend 可用：操作者通过 `$ITSME_MEMPALACE_BACKEND={stdio,auto}` 切换后，drawer 跨 MCP server 重启可读回（默认 `auto`，先尝试 stdio 再 fallback 到 inmemory，失败显式 — `MemPalaceConnectError` / `MemPalaceWriteError`，不静默吞）；
-- `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_loss_v001_known_gap` 在默认翻 `auto` 时会自动翻红，强制 docs/ROADMAP 同步更新。
+- `tests/smoke/test_e2e_in_process.py::test_cross_restart_drawer_survives` 验证 drawer 跨重启持久化（mempalace 可选依赖安装后 auto 解析到 stdio backend）。
 
 ---
 
