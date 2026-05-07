@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from itsme.core.events import EventBus
+from itsme.core.filters.envelope import strip_envelopes
 
 # --------------------------------------------------------------- config
 
@@ -95,13 +96,16 @@ def _extract_message_text(entry: dict[str, Any]) -> str:
     CC stores each turn as ``{"type": "user"|"assistant", "message":
     {"content": str | list[ContentBlock]}}``. We flatten text blocks
     and ignore tool-use / tool-result blocks for the snapshot.
+
+    T2.0a: applies envelope stripping to remove CC control blocks
+    (``<command-name>``, ``<command-args>``, etc.) that pollute drawers.
     """
     msg = entry.get("message")
     if not isinstance(msg, dict):
         return ""
     content = msg.get("content")
     if isinstance(content, str):
-        return content
+        return strip_envelopes(content)
     if isinstance(content, list):
         pieces: list[str] = []
         for block in content:
@@ -111,7 +115,8 @@ def _extract_message_text(entry: dict[str, Any]) -> str:
                 text = block.get("text", "")
                 if isinstance(text, str) and text:
                     pieces.append(text)
-        return "\n".join(pieces)
+        raw = "\n".join(pieces)
+        return strip_envelopes(raw)
     return ""
 
 

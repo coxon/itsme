@@ -142,3 +142,49 @@ class TestHasEnvelopes:
 
     def test_has_envelope_partial_false(self) -> None:
         assert not has_envelopes("<command-name>unclosed")
+
+
+# ----------------------------------------- integration: hook transcript parsing
+
+
+class TestHookIntegration:
+    """Verify envelope stripping is wired into the hook transcript parser."""
+
+    def test_extract_message_text_strips_envelopes(self) -> None:
+        from itsme.hooks._common import _extract_message_text
+
+        entry = {
+            "type": "assistant",
+            "message": {
+                "content": (
+                    "Here is my answer.\n"
+                    "<command-name>exit</command-name>\n"
+                    "<command-args>{}</command-args>\n"
+                    "Some trailing text."
+                ),
+            },
+        }
+        text = _extract_message_text(entry)
+        assert "command-name" not in text
+        assert "command-args" not in text
+        assert "Here is my answer." in text
+        assert "Some trailing text." in text
+
+    def test_extract_message_text_content_blocks_strips(self) -> None:
+        from itsme.hooks._common import _extract_message_text
+
+        entry = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Good point."},
+                    {
+                        "type": "text",
+                        "text": "<local-command-stdout>foo</local-command-stdout>",
+                    },
+                ],
+            },
+        }
+        text = _extract_message_text(entry)
+        assert "Good point." in text
+        assert "local-command-stdout" not in text
