@@ -282,7 +282,7 @@ def test_hook_capture_routes_then_is_askable(memory: Memory, tmp_path: Path) -> 
         # Give the loop a tick or two to consume.
         _spin_until(
             lambda: any(
-                e.source == "adapter:mempalace"
+                e.source == "worker:intake"
                 for e in memory._bus.tail(n=20, types=[EventType.MEMORY_STORED])
             ),
             timeout_s=2.0,
@@ -330,7 +330,7 @@ def test_consume_loop_skips_already_stored(memory: Memory, tmp_path: Path) -> No
     try:
         _spin_until(
             lambda: any(
-                e.source == "adapter:mempalace"
+                e.source == "worker:intake"
                 for e in memory._bus.tail(n=20, types=[EventType.MEMORY_STORED])
             ),
             timeout_s=2.0,

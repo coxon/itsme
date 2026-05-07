@@ -1,18 +1,20 @@
-"""Aleph — knowledge layer with two backends.
+"""Aleph — knowledge layer (Obsidian vault).
 
-Two complementary storage layers:
+Long-term wiki pages at ``~/Documents/Aleph/``, synced via iCloud.
+Source of truth for consolidated knowledge. Follows Karpathy's
+llm-wiki pattern.
 
-1. **Obsidian vault** (``vault.py``, ``round.py``) — Long-term wiki pages
-   at ``~/Documents/Aleph/``, synced via iCloud. Source of truth for
-   consolidated knowledge. Follows Karpathy's llm-wiki pattern.
-   Intake → AlephRound → create/update pages.
+Pipeline: Intake → AlephRound → create/update vault pages.
 
-2. **SQLite FTS5 index** (``store/index.py``, ``search.py``, ``api.py``)
-   — Per-turn extraction cache. Lightweight keyword search over LLM
-   extractions (summary/entities/claims). Faster than vault text search
-   for per-turn resolution. May be deprecated in v0.0.3 if vault search
-   proves sufficient.
+Modules:
+- ``vault.py`` — Read/write adapter for the Obsidian vault.
+- ``round.py`` — LLM-powered wiki consolidation (decides create vs
+  update, generates frontmatter + body).
 
-Search priority (``ask(mode=auto)``):
-  vault wiki > extraction index > MemPalace raw
+Search (``ask(mode=auto)``):
+  vault wiki > MemPalace raw
+
+The SQLite FTS5 per-turn extraction index was removed in T3.0 —
+vault pages + MemPalace raw provide sufficient coverage without
+the intermediate layer.
 """

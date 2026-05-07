@@ -1,4 +1,4 @@
-"""Intake worker — T2.0d.
+"""Intake worker — T2.0d + T3.0 (SQLite FTS5 removed).
 
 Processes hook-captured ``raw.captured`` events through the LLM intake
 pipeline:
@@ -6,17 +6,16 @@ pipeline:
 1. Groups per-turn events by ``capture_batch_id``
 2. Sends the batch to the LLM for extraction
 3. Writes ALL turns to MemPalace (raw, full recall)
-4. Writes KEEP turns to Aleph extraction index (structured, high precision)
-5. Feeds KEEP turns to AlephRound for Obsidian vault consolidation
-6. Emits ``raw.triaged`` for observability
+4. Feeds KEEP turns to AlephRound for Obsidian vault consolidation
+5. Emits ``raw.triaged`` for observability
 
 The intake worker replaces the router's ``consume_loop`` for hook
 captures. Explicit ``remember()`` calls still go through the router's
 synchronous fast-path and are NOT processed by intake.
 
 LLM degradation: if the LLM is unavailable (no API key, network error),
-turns are written to MemPalace as raw (v0.0.1 behavior) without Aleph
-extraction or vault consolidation. No data loss, just lower search precision.
+turns are written to MemPalace as raw (v0.0.1 behavior) without vault
+consolidation. No data loss, just lower search precision.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from typing import Any
 
 from itsme.core.adapters import MemPalaceAdapter
 from itsme.core.adapters.naming import room as _room
-from itsme.core.aleph.api import Aleph
 from itsme.core.aleph.round import AlephRound, RoundResult, TurnContent
 from itsme.core.aleph.vault import AlephVault
 from itsme.core.events import EventBus, EventEnvelope, EventType
@@ -68,7 +66,6 @@ class IntakeResult:
     claims: list[str]
     skip_reason: str
     drawer_id: str  # MemPalace drawer id (always written)
-    extraction_id: str  # Aleph extraction id (empty if skip/error)
 
 
 # --------------------------------------------------------------------- core
@@ -80,7 +77,6 @@ class IntakeProcessor:
     Args:
         bus: EventBus for emitting triaged events.
         adapter: MemPalace adapter for raw writes.
-        aleph: Aleph SDK for extraction writes.
         llm: LLM provider for extraction. StubProvider = degraded mode.
         wing: Wing prefix for MemPalace writes.
         vault: Optional AlephVault for wiki consolidation. When provided
@@ -93,7 +89,6 @@ class IntakeProcessor:
         *,
         bus: EventBus,
         adapter: MemPalaceAdapter,
-        aleph: Aleph,
         llm: LLMProvider,
         wing: str,
         degraded: bool | None = None,
@@ -101,7 +96,6 @@ class IntakeProcessor:
     ) -> None:
         self._bus = bus
         self._adapter = adapter
-        self._aleph = aleph
         self._llm = llm
         self._wing = wing
         self._vault = vault
@@ -215,7 +209,7 @@ class IntakeProcessor:
             ]
 
     def _write_and_emit(self, event: EventEnvelope, extraction: dict[str, Any]) -> IntakeResult:
-        """Write to MemPalace (always) + Aleph (if keep) + emit triaged."""
+        """Write to MemPalace (always) + emit triaged event."""
         content = event.payload.get("content", "")
         turn_role = event.payload.get("turn_role", "unknown")
         verdict = extraction.get("verdict", "skip")
@@ -252,22 +246,6 @@ class IntakeProcessor:
                 },
             )
 
-        # Write extraction to Aleph (keep only)
-        extraction_id = ""
-        if verdict == "keep" and drawer_id:
-            try:
-                ext = self._aleph.write_extraction(
-                    turn_id=drawer_id,
-                    raw_event_id=event.id,
-                    summary=summary,
-                    entities=[e for e in entities if isinstance(e, dict)],
-                    claims=[c for c in claims if isinstance(c, str)],
-                    source=event.source,
-                )
-                extraction_id = ext.id
-            except Exception as exc:
-                _logger.error("itsme intake: Aleph write failed: %s", exc)
-
         # Emit triaged event for observability
         self._bus.emit(
             type=EventType.MEMORY_ROUTED,
@@ -280,7 +258,6 @@ class IntakeProcessor:
                 "claim_count": len(claims),
                 "skip_reason": skip_reason,
                 "drawer_id": drawer_id,
-                "extraction_id": extraction_id,
                 "wing": self._wing,
                 "room": room,
             },
@@ -294,7 +271,6 @@ class IntakeProcessor:
             claims=claims,
             skip_reason=skip_reason,
             drawer_id=drawer_id,
-            extraction_id=extraction_id,
         )
 
     # ---------------------------------------------------------- vault round

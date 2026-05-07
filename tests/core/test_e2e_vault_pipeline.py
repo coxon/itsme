@@ -1,8 +1,8 @@
 """End-to-end tests — full pipeline with Obsidian vault integration.
 
 Tests the complete flow:
-  hook capture → intake → MemPalace + Aleph index → AlephRound → Obsidian vault
-  → ask(mode=auto) triple-engine search
+  hook capture → intake → MemPalace → AlephRound → Obsidian vault
+  → ask(mode=auto) dual-engine search
   → ask(mode=wiki) vault-only search
 """
 
@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
-from itsme.core.aleph.api import Aleph
 from itsme.core.aleph.vault import AlephVault
 from itsme.core.api import Memory
 from itsme.core.events import EventBus, EventType
@@ -35,13 +34,6 @@ def bus(tmp_path: Path) -> Iterator[EventBus]:
 @pytest.fixture
 def adapter() -> InMemoryMemPalaceAdapter:
     return InMemoryMemPalaceAdapter()
-
-
-@pytest.fixture
-def aleph() -> Iterator[Aleph]:
-    a = Aleph(":memory:")
-    yield a
-    a.close()
 
 
 @pytest.fixture
@@ -124,13 +116,12 @@ class _MultiResponseProvider:
 
 
 class TestVaultPipeline:
-    """Intake → MemPalace + Aleph index → AlephRound → Obsidian vault."""
+    """Intake → MemPalace → AlephRound → Obsidian vault."""
 
     def test_intake_creates_vault_pages(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """Kept turns flow through AlephRound and create vault wiki pages."""
@@ -189,14 +180,13 @@ class TestVaultPipeline:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
             vault=vault,
         )
         results = processor.process_batch(events)
 
-        # Intake results: both kept, both in MemPalace + Aleph
+        # Intake results: both kept, both in MemPalace
         assert len(results) == 2
         assert all(r.verdict == "keep" for r in results)
         assert all(r.drawer_id for r in results)
@@ -218,7 +208,6 @@ class TestVaultPipeline:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """AlephRound updates existing pages instead of creating dupes."""
@@ -275,7 +264,6 @@ class TestVaultPipeline:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
             vault=vault,
@@ -292,7 +280,6 @@ class TestVaultPipeline:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """When all turns are skipped, AlephRound is not called."""
@@ -309,7 +296,6 @@ class TestVaultPipeline:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
             vault=vault,
@@ -324,7 +310,6 @@ class TestVaultPipeline:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """wiki.promoted event is emitted when vault pages are created."""
@@ -359,7 +344,6 @@ class TestVaultPipeline:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
             vault=vault,
@@ -383,7 +367,6 @@ class TestAskWiki:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """ask(mode=wiki) searches vault pages."""
@@ -408,7 +391,6 @@ class TestAskWiki:
             bus=bus,
             adapter=adapter,
             project="test",
-            aleph=aleph,
             vault=vault,
         )
         result = memory.ask("Postgres", mode="wiki")
@@ -421,16 +403,15 @@ class TestAskWiki:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
     ) -> None:
         """ask(mode=wiki) without vault returns empty, no error."""
-        memory = Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
+        memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("anything", mode="wiki")
         assert result.sources == []
 
 
 # ============================================================
-# ask(mode=auto) — triple engine with vault
+# ask(mode=auto) — dual engine with vault
 # ============================================================
 
 
@@ -439,7 +420,6 @@ class TestAskAutoWithVault:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """ask(mode=auto) includes vault wiki pages in results."""
@@ -470,7 +450,6 @@ class TestAskAutoWithVault:
             bus=bus,
             adapter=adapter,
             project="test",
-            aleph=aleph,
             vault=vault,
         )
         result = memory.ask("Redis caching", mode="auto")
@@ -484,7 +463,6 @@ class TestAskAutoWithVault:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """Vault wiki hits appear before MemPalace raw hits."""
@@ -513,7 +491,6 @@ class TestAskAutoWithVault:
             bus=bus,
             adapter=adapter,
             project="test",
-            aleph=aleph,
             vault=vault,
         )
         result = memory.ask("Kubernetes", mode="auto")
@@ -533,9 +510,8 @@ class TestVaultDegradation:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
     ) -> None:
-        """IntakeProcessor without vault = v0.0.2 behavior, no crash."""
+        """IntakeProcessor without vault = basic behavior, no crash."""
         llm = StubProvider(
             response=json.dumps(
                 [
@@ -554,7 +530,6 @@ class TestVaultDegradation:
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=llm,
             wing="wing_test",
             vault=None,  # no vault
@@ -568,14 +543,12 @@ class TestVaultDegradation:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        aleph: Aleph,
         vault: AlephVault,
     ) -> None:
         """Degraded LLM = no vault round, no crash."""
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
-            aleph=aleph,
             llm=StubProvider(),  # bare = degraded
             wing="wing_test",
             vault=vault,
