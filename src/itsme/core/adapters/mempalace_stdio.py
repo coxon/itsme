@@ -339,8 +339,11 @@ class StdioMemPalaceAdapter:
                 continue
             wing_v = str(raw.get("wing", "unknown"))
             room_v = str(raw.get("room", "unknown"))
-            score = float(raw.get("similarity", 0.0))
-            score = max(0.0, min(1.0, score))  # MemPalaceHit constraint
+            # MemPalace v3.3+ returns ``max(0, 1 - distance)`` ∈ [0, 1].
+            # Older versions (v3.0.x) returned ``1 - distance`` ∈ [-1, 1].
+            # BM25-only mode returns None.  Clamp to [0, 1] for both.
+            raw_sim = raw.get("similarity")
+            score = max(0.0, min(1.0, float(raw_sim))) if raw_sim is not None else 0.0
             # MemPalace's ``mempalace_search`` does not return chromadb
             # ids today (only the document text + metadata). We need a
             # stable opaque identifier for the ``MemPalaceHit`` contract,
