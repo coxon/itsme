@@ -246,6 +246,142 @@ class TestSearch:
 
 
 # ============================================================
+# CJK search — T1.13.5-class fix for wiki.py
+# ============================================================
+
+
+def _write_chinese_page(
+    aleph: Aleph,
+    slug: str,
+    title: str,
+    summary: str,
+    body: str = "",
+    *,
+    aliases: list[str] | None = None,
+) -> None:
+    """Helper: write a page with CJK content."""
+    aleph.write_page(
+        slug=slug,
+        domain="work",
+        subcategory="people",
+        frontmatter={
+            "title": title,
+            "type": "person",
+            "domain": "work",
+            "subcategory": "people",
+            "summary": summary,
+            "aliases": aliases or [],
+            "tags": [],
+        },
+        body=body or f"# {title}\n\n{summary}\n",
+    )
+
+
+class TestCJKSearch:
+    """CJK search: Chinese queries without spaces must still match pages.
+
+    Before fix: ``"海龙负责什么"`` → ``split()`` produces 1 token →
+    substring match fails → 0 hits.
+
+    After fix: ``_search_tokens("海龙负责什么")`` → ``{"海","龙","负","责","什","么"}``
+    → ``"海" in "海龙"`` matches → hit found.
+    """
+
+    def test_cjk_no_space_finds_title(self, aleph: Aleph) -> None:
+        """'海龙负责什么' must find the page titled '海龙'."""
+        _write_chinese_page(aleph, "hailong", "海龙", "产品负责人，负责星图项目")
+
+        hits = aleph.search("海龙负责什么")
+        assert len(hits) >= 1
+        assert hits[0].meta.title == "海龙"
+
+    def test_cjk_single_token_still_works(self, aleph: Aleph) -> None:
+        """Single CJK term (short query) still matches."""
+        _write_chinese_page(aleph, "hailong", "海龙", "产品负责人")
+
+        hits = aleph.search("海龙")
+        assert len(hits) >= 1
+        assert hits[0].meta.title == "海龙"
+
+    def test_cjk_space_separated_still_works(self, aleph: Aleph) -> None:
+        """Space-separated CJK (existing behavior) still works."""
+        _write_chinese_page(aleph, "hailong", "海龙", "产品负责人，负责星图项目")
+
+        hits = aleph.search("海龙 负责")
+        assert len(hits) >= 1
+        assert hits[0].meta.title == "海龙"
+
+    def test_cjk_summary_match(self, aleph: Aleph) -> None:
+        """CJK query matches page summary, not just title."""
+        _write_chinese_page(aleph, "data-gov", "数据治理", "数据中心底座建设方案")
+
+        hits = aleph.search("底座建设")
+        assert len(hits) >= 1
+        assert hits[0].meta.title == "数据治理"
+
+    def test_cjk_body_match(self, aleph: Aleph) -> None:
+        """CJK query matches page body text."""
+        _write_chinese_page(
+            aleph,
+            "starmap",
+            "星图计划",
+            "智能体协作平台",
+            body="# 星图计划\n\n海龙负责产品设计，张扬负责后端开发。\n",
+        )
+
+        hits = aleph.search("后端开发")
+        assert len(hits) >= 1
+
+    def test_cjk_title_ranked_above_body(self, aleph: Aleph) -> None:
+        """Page with CJK title match ranks above body-only match."""
+        _write_chinese_page(aleph, "hailong", "海龙", "产品负责人")
+        _write_chinese_page(
+            aleph,
+            "starmap",
+            "星图计划",
+            "智能体协作平台",
+            body="# 星图计划\n\n海龙负责产品设计。\n",
+        )
+
+        hits = aleph.search("海龙")
+        assert len(hits) >= 2
+        # Title match ("海龙") should rank above body-only match
+        assert hits[0].meta.title == "海龙"
+
+    def test_mixed_cjk_latin(self, aleph: Aleph) -> None:
+        """Mixed CJK + Latin query works."""
+        _write_chinese_page(
+            aleph,
+            "postgres-decision",
+            "Postgres选型决策",
+            "选择Postgres作为主数据库",
+        )
+
+        hits = aleph.search("Postgres选型")
+        assert len(hits) >= 1
+
+    def test_cjk_alias_match(self, aleph: Aleph) -> None:
+        """CJK query matches page aliases."""
+        _write_chinese_page(
+            aleph,
+            "hailong",
+            "海龙",
+            "产品负责人",
+            aliases=["产品经理海龙"],
+        )
+
+        hits = aleph.search("产品经理")
+        assert len(hits) >= 1
+
+    def test_japanese_hiragana(self, aleph: Aleph) -> None:
+        """Japanese hiragana tokenized per-character."""
+        _write_chinese_page(aleph, "japan-test", "テスト概念", "これはテストです")
+
+        hits = aleph.search("テスト")
+        assert len(hits) >= 1
+
+
+# ============================================================
 # Write operations
 # ============================================================
 

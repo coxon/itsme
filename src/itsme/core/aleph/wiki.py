@@ -31,6 +31,7 @@ Layout::
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -39,6 +40,51 @@ from typing import Any
 import yaml
 
 _logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------- CJK tokenization
+
+# CJK Unified Ideographs + Extension A + Hiragana + Katakana + Hangul.
+# Same range as ``adapters/mempalace.py`` — kept in sync.
+_CJK_RE = re.compile(
+    r"[぀-ゟ"  # Hiragana
+    r"゠-ヿ"  # Katakana
+    r"㐀-䶿"  # CJK Extension A
+    r"一-鿿"  # CJK Unified Ideographs
+    r"가-힯"  # Hangul Syllables
+    r"]"
+)
+
+_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _search_tokens(text: str) -> set[str]:
+    """Split *text* into search tokens with CJK-aware tokenization.
+
+    Latin / numeric runs keep whole-word boundaries (lowercased).
+    CJK runs are split into individual characters so that a query like
+    "海龙负责什么" can match a page titled "海龙" via per-character
+    substring matching.
+
+    This mirrors the fix applied to ``InMemoryMemPalaceAdapter`` in
+    T1.13.5 — without per-character CJK tokenization, ``split()``
+    produces a single giant token that fails substring matching against
+    shorter content.
+    """
+    out: set[str] = set()
+    for raw in _TOKEN_RE.findall(text):
+        cjk_chars = _CJK_RE.findall(raw)
+        if cjk_chars and len(cjk_chars) == len(raw):
+            # Pure CJK run: individual characters
+            out.update(cjk_chars)
+        elif cjk_chars:
+            # Mixed run (e.g. "v2版本"): whole token + individual CJK chars
+            out.add(raw.lower())
+            out.update(cjk_chars)
+        else:
+            # Pure Latin/numeric: whole token lowercased
+            out.add(raw.lower())
+    return out
+
 
 # ------------------------------------------------------------------ types
 
@@ -204,7 +250,7 @@ class Aleph:
         if not query or not query.strip():
             return []
 
-        q_terms = set(query.lower().split())
+        q_terms = _search_tokens(query)
         if not q_terms:
             return []
 
