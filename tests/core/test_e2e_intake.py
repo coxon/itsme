@@ -293,7 +293,7 @@ class TestT225LLMDegradation:
     def test_degraded_ask_auto_falls_back_to_mempalace(
         self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
-        """ask(mode=auto) with no vault still returns MemPalace hits."""
+        """ask(mode=auto) with no Aleph still returns MemPalace hits."""
         adapter.write(
             content="Redis caching layer deployed in production",
             wing="wing_test",
@@ -307,14 +307,14 @@ class TestT225LLMDegradation:
         mp_sources = [s for s in result.sources if s.kind == "verbatim"]
         assert len(mp_sources) >= 1
 
-    def test_memory_without_vault_still_functions(
+    def test_memory_without_aleph_still_functions(
         self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
-        """Memory without vault → auto mode degrades gracefully."""
+        """Memory without Aleph → auto mode degrades gracefully."""
         memory = Memory(bus=bus, adapter=adapter, project="test")
 
         adapter.write(
-            content="No vault but still searchable",
+            content="No Aleph but still searchable",
             wing="wing_test",
             room="room_general",
         )

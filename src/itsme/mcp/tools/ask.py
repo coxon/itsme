@@ -1,13 +1,13 @@
 """``ask(question, mode?)`` — query tool (T1.11 + T3.0).
 
 Tool-layer responsibility: argument validation + orchestration only.
-We do **not** call MemPalace MCP or vault internals here; everything
+We do **not** call MemPalace MCP or Aleph internals here; everything
 goes through :class:`itsme.core.Memory` so the read path stays
 swappable.
 
 v0.0.1 honored only ``mode='verbatim'``; v0.0.2 added ``mode='auto'``
 for dual-engine search (Vault wiki + MemPalace raw). T3.0 removed the
-SQLite FTS5 extraction layer — search is now vault + MemPalace.
+SQLite FTS5 extraction layer — search is now wiki + MemPalace.
 """
 
 from __future__ import annotations

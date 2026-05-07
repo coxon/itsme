@@ -1,9 +1,9 @@
-"""End-to-end tests — full pipeline with Obsidian vault integration.
+"""End-to-end tests — full pipeline with Aleph wiki integration.
 
 Tests the complete flow:
-  hook capture → intake → MemPalace → AlephRound → Obsidian vault
+  hook capture → intake → MemPalace → AlephRound → wiki pages
   → ask(mode=auto) dual-engine search
-  → ask(mode=wiki) vault-only search
+  → ask(mode=wiki) wiki-only search
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
-from itsme.core.aleph.vault import AlephVault
+from itsme.core.aleph.wiki import Aleph
 from itsme.core.api import Memory
 from itsme.core.events import EventBus, EventType
 from itsme.core.llm import StubProvider
@@ -37,27 +37,27 @@ def adapter() -> InMemoryMemPalaceAdapter:
 
 
 @pytest.fixture
-def vault(tmp_path: Path) -> AlephVault:
-    """Create a minimal Aleph vault for testing."""
-    vault_root = tmp_path / "aleph-vault"
-    vault_root.mkdir()
-    (vault_root / "dna.md").write_text("# Aleph DNA\n\nTest vault.\n")
-    (vault_root / "index.md").write_text(
+def aleph(tmp_path: Path) -> Aleph:
+    """Create a minimal Aleph wiki for testing."""
+    aleph_root = tmp_path / "aleph-wiki"
+    aleph_root.mkdir()
+    (aleph_root / "dna.md").write_text("# Aleph DNA\n\nTest wiki.\n")
+    (aleph_root / "index.md").write_text(
         "# Aleph Index\n\n"
         "<!-- Claude 维护 -->\n\n"
         "| 页面 | 类型 | Wing / 子类 | 摘要 | 更新日期 |\n"
         "|------|------|------------|------|--------|\n"
     )
-    (vault_root / "log.md").write_text("# Aleph Log\n\n<!-- append-only -->\n\n")
-    (vault_root / "wings").mkdir()
-    (vault_root / "sources").mkdir()
-    return AlephVault(vault_root)
+    (aleph_root / "log.md").write_text("# Aleph Log\n\n<!-- append-only -->\n\n")
+    (aleph_root / "wings").mkdir()
+    (aleph_root / "sources").mkdir()
+    return Aleph(aleph_root)
 
 
 def _emit_hook_turns(
     bus: EventBus,
     turns: list[tuple[str, str]],
-    batch_id: str = "batch-vault",
+    batch_id: str = "batch-wiki",
 ) -> list:
     """Simulate hook-captured per-turn events."""
     from itsme.core.dedup import content_hash
@@ -111,20 +111,20 @@ class _MultiResponseProvider:
 
 
 # ============================================================
-# Full pipeline — intake → vault
+# Full pipeline — intake → wiki
 # ============================================================
 
 
 class TestVaultPipeline:
-    """Intake → MemPalace → AlephRound → Obsidian vault."""
+    """Intake → MemPalace → AlephRound → wiki pages."""
 
-    def test_intake_creates_vault_pages(
+    def test_intake_creates_wiki_pages(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
-        """Kept turns flow through AlephRound and create vault wiki pages."""
+        """Kept turns flow through AlephRound and create wiki pages."""
         llm = _make_intake_and_round_llm(
             # Intake response: 2 kept turns
             intake_response=json.dumps(
@@ -182,7 +182,7 @@ class TestVaultPipeline:
             adapter=adapter,
             llm=llm,
             wing="wing_test",
-            vault=vault,
+            aleph=aleph,
         )
         results = processor.process_batch(events)
 
@@ -192,27 +192,27 @@ class TestVaultPipeline:
         assert all(r.drawer_id for r in results)
 
         # Vault pages created
-        assert vault.find_page("postgres") is not None
-        assert vault.find_page("redis") is not None
+        assert aleph.find_page("postgres") is not None
+        assert aleph.find_page("redis") is not None
 
         # Index updated
-        index = vault.read_index()
+        index = aleph.read_index()
         assert any("postgres" in e.page_link for e in index)
         assert any("redis" in e.page_link for e in index)
 
         # Log updated
-        log = (vault.root / "log.md").read_text()
+        log = (aleph.root / "log.md").read_text()
         assert "[INGEST]" in log
 
-    def test_intake_updates_existing_vault_page(
+    def test_intake_updates_existing_wiki_page(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
         """AlephRound updates existing pages instead of creating dupes."""
         # Pre-create a page
-        vault.write_page(
+        aleph.write_page(
             slug="postgres",
             domain="technology",
             subcategory="engineering",
@@ -266,12 +266,12 @@ class TestVaultPipeline:
             adapter=adapter,
             llm=llm,
             wing="wing_test",
-            vault=vault,
+            aleph=aleph,
         )
         processor.process_batch(events)
 
         # Page updated, not duplicated
-        meta, body = vault.read_page("wings/technology/engineering/postgres.md")
+        meta, body = aleph.read_page("wings/technology/engineering/postgres.md")
         assert meta is not None
         assert "[[analytics-pipeline]]" in meta.related
         assert "分析管道" in body
@@ -280,7 +280,7 @@ class TestVaultPipeline:
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
         """When all turns are skipped, AlephRound is not called."""
         llm = StubProvider(
@@ -298,21 +298,21 @@ class TestVaultPipeline:
             adapter=adapter,
             llm=llm,
             wing="wing_test",
-            vault=vault,
+            aleph=aleph,
         )
         results = processor.process_batch(events)
 
         assert results[0].verdict == "skip"
         assert results[0].drawer_id  # still in MemPalace
-        assert len(vault.list_pages()) == 0  # no vault pages
+        assert len(aleph.list_pages()) == 0  # no wiki pages
 
     def test_wiki_promoted_event_emitted(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
-        """wiki.promoted event is emitted when vault pages are created."""
+        """wiki.promoted event is emitted when wiki pages are created."""
         llm = _make_intake_and_round_llm(
             intake_response=json.dumps(
                 [
@@ -346,7 +346,7 @@ class TestVaultPipeline:
             adapter=adapter,
             llm=llm,
             wing="wing_test",
-            vault=vault,
+            aleph=aleph,
         )
         processor.process_batch(events)
 
@@ -354,24 +354,24 @@ class TestVaultPipeline:
         promoted = bus.tail(n=50, types=[EventType.WIKI_PROMOTED])
         assert len(promoted) == 1
         assert promoted[0].payload["pages_created"] == 1
-        assert promoted[0].source == "worker:intake:vault-round"
+        assert promoted[0].source == "worker:intake:wiki-round"
 
 
 # ============================================================
-# ask(mode=wiki) — vault-only search
+# ask(mode=wiki) — wiki-only search
 # ============================================================
 
 
 class TestAskWiki:
-    def test_ask_wiki_finds_vault_pages(
+    def test_ask_wiki_finds_pages(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
-        """ask(mode=wiki) searches vault pages."""
-        # Create a vault page directly
-        vault.write_page(
+        """ask(mode=wiki) searches wiki pages."""
+        # Create a wiki page directly
+        aleph.write_page(
             slug="postgres",
             domain="technology",
             subcategory="engineering",
@@ -391,7 +391,7 @@ class TestAskWiki:
             bus=bus,
             adapter=adapter,
             project="test",
-            vault=vault,
+            aleph=aleph,
         )
         result = memory.ask("Postgres", mode="wiki")
 
@@ -399,32 +399,32 @@ class TestAskWiki:
         assert all(s.kind == "wiki" for s in result.sources)
         assert any("Postgres" in s.content or "关系型" in s.content for s in result.sources)
 
-    def test_ask_wiki_no_vault_empty(
+    def test_ask_wiki_no_aleph_empty(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
     ) -> None:
-        """ask(mode=wiki) without vault returns empty, no error."""
+        """ask(mode=wiki) without Aleph returns empty, no error."""
         memory = Memory(bus=bus, adapter=adapter, project="test")
         result = memory.ask("anything", mode="wiki")
         assert result.sources == []
 
 
 # ============================================================
-# ask(mode=auto) — dual engine with vault
+# ask(mode=auto) — dual engine with Aleph
 # ============================================================
 
 
 class TestAskAutoWithVault:
-    def test_auto_includes_vault_hits(
+    def test_auto_includes_wiki_hits(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
-        """ask(mode=auto) includes vault wiki pages in results."""
+        """ask(mode=auto) includes wiki pages in results."""
         # Vault page
-        vault.write_page(
+        aleph.write_page(
             slug="redis",
             domain="technology",
             subcategory="engineering",
@@ -450,7 +450,7 @@ class TestAskAutoWithVault:
             bus=bus,
             adapter=adapter,
             project="test",
-            vault=vault,
+            aleph=aleph,
         )
         result = memory.ask("Redis caching", mode="auto")
 
@@ -459,14 +459,14 @@ class TestAskAutoWithVault:
         assert "wiki" in kinds
         assert "verbatim" in kinds
 
-    def test_auto_vault_hit_ranked_first(
+    def test_auto_wiki_hit_ranked_first(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
-        """Vault wiki hits appear before MemPalace raw hits."""
-        vault.write_page(
+        """Wiki hits appear before MemPalace raw hits."""
+        aleph.write_page(
             slug="kubernetes",
             domain="technology",
             subcategory="engineering",
@@ -491,7 +491,7 @@ class TestAskAutoWithVault:
             bus=bus,
             adapter=adapter,
             project="test",
-            vault=vault,
+            aleph=aleph,
         )
         result = memory.ask("Kubernetes", mode="auto")
 
@@ -501,17 +501,17 @@ class TestAskAutoWithVault:
 
 
 # ============================================================
-# Degradation — no vault
+# Degradation — no Aleph
 # ============================================================
 
 
 class TestVaultDegradation:
-    def test_intake_without_vault_still_works(
+    def test_intake_without_aleph_still_works(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
     ) -> None:
-        """IntakeProcessor without vault = basic behavior, no crash."""
+        """IntakeProcessor without Aleph = basic behavior, no crash."""
         llm = StubProvider(
             response=json.dumps(
                 [
@@ -532,33 +532,33 @@ class TestVaultDegradation:
             adapter=adapter,
             llm=llm,
             wing="wing_test",
-            vault=None,  # no vault
+            aleph=None,  # no Aleph
         )
         results = processor.process_batch(events)
 
         assert len(results) == 1
         assert results[0].drawer_id  # MemPalace still written
 
-    def test_degraded_llm_skips_vault_round(
+    def test_degraded_llm_skips_wiki_round(
         self,
         bus: EventBus,
         adapter: InMemoryMemPalaceAdapter,
-        vault: AlephVault,
+        aleph: Aleph,
     ) -> None:
-        """Degraded LLM = no vault round, no crash."""
+        """Degraded LLM = no Aleph round, no crash."""
         processor = IntakeProcessor(
             bus=bus,
             adapter=adapter,
             llm=StubProvider(),  # bare = degraded
             wing="wing_test",
-            vault=vault,
+            aleph=aleph,
         )
 
         events = _emit_hook_turns(bus, [("user", "important stuff")])
         results = processor.process_batch(events)
 
         assert results[0].drawer_id  # MemPalace written
-        assert len(vault.list_pages()) == 0  # no vault writes (degraded)
+        assert len(aleph.list_pages()) == 0  # no Aleph writes (degraded)
 
 
 # ============================================================
@@ -567,35 +567,35 @@ class TestVaultDegradation:
 
 
 class TestVaultDiscovery:
-    def test_discover_vault_from_env(
+    def test_discover_aleph_from_env(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """$ITSME_ALEPH_VAULT points to a vault."""
-        from itsme.core.api import _discover_vault
+        """$ITSME_ALEPH_ROOT points to a wiki."""
+        from itsme.core.api import _discover_aleph
 
-        vault_root = tmp_path / "my-vault"
-        vault_root.mkdir()
-        (vault_root / "dna.md").write_text("# DNA\n")
-        (vault_root / "wings").mkdir()
-        (vault_root / "sources").mkdir()
+        aleph_root = tmp_path / "my-wiki"
+        aleph_root.mkdir()
+        (aleph_root / "dna.md").write_text("# DNA\n")
+        (aleph_root / "wings").mkdir()
+        (aleph_root / "sources").mkdir()
 
-        monkeypatch.setenv("ITSME_ALEPH_VAULT", str(vault_root))
-        discovered = _discover_vault()
+        monkeypatch.setenv("ITSME_ALEPH_ROOT", str(aleph_root))
+        discovered = _discover_aleph()
         assert discovered is not None
-        assert discovered.root == vault_root.resolve()
+        assert discovered.root == aleph_root.resolve()
 
-    def test_discover_vault_missing_returns_none(
+    def test_discover_aleph_missing_returns_none(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """No vault at any candidate path → None."""
-        from itsme.core.api import _discover_vault
+        """No wiki at any candidate path → None."""
+        from itsme.core.api import _discover_aleph
 
-        monkeypatch.setenv("ITSME_ALEPH_VAULT", "")
+        monkeypatch.setenv("ITSME_ALEPH_ROOT", "")
         # Override HOME so ~/Documents/Aleph/ doesn't accidentally exist
         monkeypatch.setenv("HOME", str(tmp_path))
-        discovered = _discover_vault()
+        discovered = _discover_aleph()
         assert discovered is None

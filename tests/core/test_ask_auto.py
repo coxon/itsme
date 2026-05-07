@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
-from itsme.core.aleph.vault import AlephVault
+from itsme.core.aleph.wiki import Aleph
 from itsme.core.api import Memory
 from itsme.core.events import EventBus, EventType
 
@@ -32,13 +32,13 @@ def adapter() -> InMemoryMemPalaceAdapter:
 
 
 @pytest.fixture
-def vault(tmp_path: Path) -> AlephVault:
-    vault_root = tmp_path / "vault"
-    vault_root.mkdir()
-    (vault_root / "dna.md").write_text("# DNA\n")
-    (vault_root / "wings").mkdir()
-    (vault_root / "sources").mkdir()
-    return AlephVault(vault_root)
+def aleph(tmp_path: Path) -> Aleph:
+    aleph_root = tmp_path / "aleph"
+    aleph_root.mkdir()
+    (aleph_root / "dna.md").write_text("# DNA\n")
+    (aleph_root / "wings").mkdir()
+    (aleph_root / "sources").mkdir()
+    return Aleph(aleph_root)
 
 
 @pytest.fixture
@@ -47,10 +47,10 @@ def memory(bus: EventBus, adapter: InMemoryMemPalaceAdapter) -> Memory:
 
 
 @pytest.fixture
-def memory_with_vault(
-    bus: EventBus, adapter: InMemoryMemPalaceAdapter, vault: AlephVault
+def memory_with_aleph(
+    bus: EventBus, adapter: InMemoryMemPalaceAdapter, aleph: Aleph
 ) -> Memory:
-    return Memory(bus=bus, adapter=adapter, project="test", vault=vault)
+    return Memory(bus=bus, adapter=adapter, project="test", aleph=aleph)
 
 
 class TestAskAuto:
@@ -73,9 +73,9 @@ class TestAskAuto:
         mp_sources = [s for s in result.sources if s.kind == "verbatim"]
         assert len(mp_sources) >= 1
 
-    def test_auto_returns_vault_hits(self, memory_with_vault: Memory, vault: AlephVault) -> None:
-        """Vault wiki hits show up in auto mode."""
-        vault.write_page(
+    def test_auto_returns_wiki_hits(self, memory_with_aleph: Memory, aleph: Aleph) -> None:
+        """Wiki hits show up in auto mode."""
+        aleph.write_page(
             slug="postgres",
             domain="technology",
             subcategory="engineering",
@@ -90,7 +90,7 @@ class TestAskAuto:
             body="# Postgres\n\nChosen for concurrent writes.\n",
         )
 
-        result = memory_with_vault.ask("Postgres", mode="auto")
+        result = memory_with_aleph.ask("Postgres", mode="auto")
         wiki_sources = [s for s in result.sources if s.kind == "wiki"]
         assert len(wiki_sources) >= 1
         assert any("Postgres" in s.content for s in wiki_sources)
@@ -110,10 +110,10 @@ class TestAskAuto:
         assert "wiki_hits" in payload
         assert "mp_hits" in payload
 
-    def test_auto_without_vault_works(
+    def test_auto_without_aleph_works(
         self, bus: EventBus, adapter: InMemoryMemPalaceAdapter
     ) -> None:
-        """Memory without vault → auto mode still works (MP only)."""
+        """Memory without Aleph → auto mode still works (MP only)."""
         mem = Memory(bus=bus, adapter=adapter, project="test")
         adapter.write(
             content="Fallback content for auto",

@@ -1,4 +1,4 @@
-"""Tests for AlephRound — LLM-powered vault consolidation."""
+"""Tests for AlephRound — LLM-powered wiki consolidation."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 
 from itsme.core.aleph.round import AlephRound, TurnContent, _parse_round_response
-from itsme.core.aleph.vault import AlephVault
+from itsme.core.aleph.wiki import Aleph
 from itsme.core.llm import StubProvider
 
 
 @pytest.fixture
-def vault(tmp_path: Path) -> AlephVault:
-    """Minimal Aleph vault."""
+def aleph(tmp_path: Path) -> Aleph:
+    """Minimal Aleph wiki."""
     (tmp_path / "dna.md").write_text("# Aleph DNA\n")
     (tmp_path / "index.md").write_text(
         "# Aleph Index\n\n"
@@ -25,7 +25,7 @@ def vault(tmp_path: Path) -> AlephVault:
     (tmp_path / "log.md").write_text("# Aleph Log\n\n<!-- append-only，不要修改已有行 -->\n\n")
     (tmp_path / "wings").mkdir()
     (tmp_path / "sources").mkdir()
-    return AlephVault(tmp_path)
+    return Aleph(tmp_path)
 
 
 def _make_llm_response(operations: list[dict[str, object]]) -> str:
@@ -38,8 +38,8 @@ def _make_llm_response(operations: list[dict[str, object]]) -> str:
 
 
 class TestRoundCreate:
-    def test_creates_new_page(self, vault: AlephVault) -> None:
-        """LLM says create → page exists in vault."""
+    def test_creates_new_page(self, aleph: Aleph) -> None:
+        """LLM says create → page exists in wiki."""
         llm = StubProvider(
             response=_make_llm_response(
                 [
@@ -58,7 +58,7 @@ class TestRoundCreate:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process(
             [
                 TurnContent(role="user", content="I decided to use Postgres for concurrent writes"),
@@ -67,12 +67,12 @@ class TestRoundCreate:
 
         assert result.pages_created == 1
         assert result.errors == []
-        meta = vault.find_page("postgres")
+        meta = aleph.find_page("postgres")
         assert meta is not None
         assert meta.title == "Postgres"
         assert meta.domain == "technology"
 
-    def test_creates_multiple_pages(self, vault: AlephVault) -> None:
+    def test_creates_multiple_pages(self, aleph: Aleph) -> None:
         llm = StubProvider(
             response=_make_llm_response(
                 [
@@ -98,7 +98,7 @@ class TestRoundCreate:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process(
             [
                 TurnContent(role="user", content="Redis for caching, User Service as microservice"),
@@ -106,10 +106,10 @@ class TestRoundCreate:
         )
 
         assert result.pages_created == 2
-        assert vault.find_page("redis") is not None
-        assert vault.find_page("user-service") is not None
+        assert aleph.find_page("redis") is not None
+        assert aleph.find_page("user-service") is not None
 
-    def test_index_updated(self, vault: AlephVault) -> None:
+    def test_index_updated(self, aleph: Aleph) -> None:
         llm = StubProvider(
             response=_make_llm_response(
                 [
@@ -126,13 +126,13 @@ class TestRoundCreate:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         rnd.process([TurnContent(role="user", content="test")])
 
-        entries = vault.read_index()
+        entries = aleph.read_index()
         assert any("test-page" in e.page_link for e in entries)
 
-    def test_log_appended(self, vault: AlephVault) -> None:
+    def test_log_appended(self, aleph: Aleph) -> None:
         llm = StubProvider(
             response=_make_llm_response(
                 [
@@ -149,10 +149,10 @@ class TestRoundCreate:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         rnd.process([TurnContent(role="user", content="test")])
 
-        log = (vault.root / "log.md").read_text()
+        log = (aleph.root / "log.md").read_text()
         assert "[INGEST]" in log
         assert "itsme:aleph-round" in log
         assert "新增 1 页" in log
@@ -164,10 +164,10 @@ class TestRoundCreate:
 
 
 class TestRoundUpdate:
-    def test_updates_existing_page(self, vault: AlephVault) -> None:
+    def test_updates_existing_page(self, aleph: Aleph) -> None:
         """LLM says update → existing page gains new content."""
         # Create a page first
-        vault.write_page(
+        aleph.write_page(
             slug="postgres",
             domain="technology",
             subcategory="engineering",
@@ -199,7 +199,7 @@ class TestRoundUpdate:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process(
             [
                 TurnContent(role="user", content="Postgres is our main DB for user service"),
@@ -207,13 +207,13 @@ class TestRoundUpdate:
         )
 
         assert result.pages_updated == 1
-        meta, body = vault.read_page("wings/technology/engineering/postgres.md")
+        meta, body = aleph.read_page("wings/technology/engineering/postgres.md")
         assert meta is not None
         assert "[[user-service]]" in meta.related
         assert "用户服务的主数据库" in body
         assert "2026-05-07 更新" in body
 
-    def test_update_nonexistent_records_error(self, vault: AlephVault) -> None:
+    def test_update_nonexistent_records_error(self, aleph: Aleph) -> None:
         """Update of nonexistent page → error in result, no crash."""
         llm = StubProvider(
             response=_make_llm_response(
@@ -223,7 +223,7 @@ class TestRoundUpdate:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process([TurnContent(role="user", content="test")])
 
         assert result.pages_updated == 0
@@ -236,9 +236,9 @@ class TestRoundUpdate:
 
 
 class TestRoundMixed:
-    def test_create_and_update_in_one_round(self, vault: AlephVault) -> None:
+    def test_create_and_update_in_one_round(self, aleph: Aleph) -> None:
         # Pre-existing page
-        vault.write_page(
+        aleph.write_page(
             slug="redis",
             domain="technology",
             subcategory="engineering",
@@ -278,7 +278,7 @@ class TestRoundMixed:
             )
         )
 
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process(
             [
                 TurnContent(role="user", content="We use Redis for session storage"),
@@ -287,8 +287,8 @@ class TestRoundMixed:
 
         assert result.pages_created == 1
         assert result.pages_updated == 1
-        assert vault.find_page("session-store") is not None
-        meta = vault.find_page("redis")
+        assert aleph.find_page("session-store") is not None
+        meta = aleph.find_page("redis")
         assert meta is not None
         assert "[[session-store]]" in meta.related
 
@@ -299,16 +299,16 @@ class TestRoundMixed:
 
 
 class TestRoundLLMEdgeCases:
-    def test_empty_turns(self, vault: AlephVault) -> None:
+    def test_empty_turns(self, aleph: Aleph) -> None:
         llm = StubProvider(response="[]")
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process([])
         assert result.pages_created == 0
 
-    def test_llm_returns_empty_array(self, vault: AlephVault) -> None:
+    def test_llm_returns_empty_array(self, aleph: Aleph) -> None:
         """LLM decides nothing is wiki-worthy."""
         llm = StubProvider(response="[]")
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process(
             [
                 TurnContent(role="user", content="Hello, how are you?"),
@@ -317,13 +317,13 @@ class TestRoundLLMEdgeCases:
         assert result.pages_created == 0
         assert result.pages_skipped == 1
 
-    def test_llm_returns_garbage(self, vault: AlephVault) -> None:
+    def test_llm_returns_garbage(self, aleph: Aleph) -> None:
         llm = StubProvider(response="this is not json at all")
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process([TurnContent(role="user", content="test")])
         assert result.pages_created == 0
 
-    def test_llm_returns_markdown_fenced(self, vault: AlephVault) -> None:
+    def test_llm_returns_markdown_fenced(self, aleph: Aleph) -> None:
         inner = _make_llm_response(
             [
                 {
@@ -338,13 +338,13 @@ class TestRoundLLMEdgeCases:
             ]
         )
         llm = StubProvider(response=f"```json\n{inner}\n```")
-        rnd = AlephRound(vault=vault, llm=llm)
+        rnd = AlephRound(aleph=aleph, llm=llm)
         result = rnd.process([TurnContent(role="user", content="test")])
         assert result.pages_created == 1
 
-    def test_llm_unavailable_degrades(self, vault: AlephVault) -> None:
+    def test_llm_unavailable_degrades(self, aleph: Aleph) -> None:
         """Bare StubProvider = degraded mode, no crash."""
-        rnd = AlephRound(vault=vault, llm=StubProvider())
+        rnd = AlephRound(aleph=aleph, llm=StubProvider())
         result = rnd.process([TurnContent(role="user", content="important stuff")])
         # Degraded: empty response → no operations
         assert result.pages_created == 0

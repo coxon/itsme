@@ -6,7 +6,7 @@ pipeline:
 1. Groups per-turn events by ``capture_batch_id``
 2. Sends the batch to the LLM for extraction
 3. Writes ALL turns to MemPalace (raw, full recall)
-4. Feeds KEEP turns to AlephRound for Obsidian vault consolidation
+4. Feeds KEEP turns to AlephRound for wiki consolidation
 5. Emits ``raw.triaged`` for observability
 
 The intake worker replaces the router's ``consume_loop`` for hook
@@ -14,7 +14,7 @@ captures. Explicit ``remember()`` calls still go through the router's
 synchronous fast-path and are NOT processed by intake.
 
 LLM degradation: if the LLM is unavailable (no API key, network error),
-turns are written to MemPalace as raw (v0.0.1 behavior) without vault
+turns are written to MemPalace as raw (v0.0.1 behavior) without wiki
 consolidation. No data loss, just lower search precision.
 """
 
@@ -32,7 +32,7 @@ from typing import Any
 from itsme.core.adapters import MemPalaceAdapter
 from itsme.core.adapters.naming import room as _room
 from itsme.core.aleph.round import AlephRound, RoundResult, TurnContent
-from itsme.core.aleph.vault import AlephVault
+from itsme.core.aleph.wiki import Aleph
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.llm import LLMProvider, LLMUnavailableError, StubProvider
 
@@ -79,9 +79,9 @@ class IntakeProcessor:
         adapter: MemPalace adapter for raw writes.
         llm: LLM provider for extraction. StubProvider = degraded mode.
         wing: Wing prefix for MemPalace writes.
-        vault: Optional AlephVault for wiki consolidation. When provided
-            (with a working LLM), kept turns are consolidated into
-            Obsidian vault wiki pages via AlephRound after each batch.
+        aleph: Optional :class:`Aleph` for wiki consolidation. When
+            provided (with a working LLM), kept turns are consolidated
+            into wiki pages via AlephRound after each batch.
     """
 
     def __init__(
@@ -92,13 +92,13 @@ class IntakeProcessor:
         llm: LLMProvider,
         wing: str,
         degraded: bool | None = None,
-        vault: AlephVault | None = None,
+        aleph: Aleph | None = None,
     ) -> None:
         self._bus = bus
         self._adapter = adapter
         self._llm = llm
         self._wing = wing
-        self._vault = vault
+        self._aleph = aleph
         # Auto-detect degraded mode: a bare StubProvider (empty response)
         # means no real LLM is available.  A StubProvider with a canned
         # response is used by tests to simulate a working LLM.
@@ -107,9 +107,9 @@ class IntakeProcessor:
         else:
             self._degraded = isinstance(llm, StubProvider) and not llm._response
 
-        # Build AlephRound if vault + working LLM are both available
-        if vault is not None and not self._degraded:
-            self._round: AlephRound | None = AlephRound(vault=vault, llm=llm)
+        # Build AlephRound if Aleph + working LLM are both available
+        if aleph is not None and not self._degraded:
+            self._round: AlephRound | None = AlephRound(aleph=aleph, llm=llm)
         else:
             self._round = None
 
@@ -118,8 +118,8 @@ class IntakeProcessor:
 
         All turns are written to MemPalace regardless of LLM verdict.
         KEEP turns additionally get Aleph extraction entries.
-        After all writes, KEEP turns are fed to AlephRound for Obsidian
-        vault consolidation (if vault is configured).
+        After all writes, KEEP turns are fed to AlephRound for wiki
+        consolidation (if Aleph is configured).
 
         Args:
             events: List of ``raw.captured`` events from the same
@@ -141,11 +141,11 @@ class IntakeProcessor:
             result = self._write_and_emit(event, extraction)
             results.append(result)
 
-        # Step 3: Consolidate kept turns into Obsidian vault
+        # Step 3: Consolidate kept turns into wiki pages
         # Only include turns that were kept AND successfully written
-        round_result = self._run_vault_round(events, results)
+        round_result = self._run_wiki_round(events, results)
         if round_result is not None:
-            self._emit_vault_events(round_result)
+            self._emit_wiki_events(round_result)
 
         return results
 
@@ -273,20 +273,20 @@ class IntakeProcessor:
             drawer_id=drawer_id,
         )
 
-    # ---------------------------------------------------------- vault round
+    # ---------------------------------------------------------- wiki round
 
-    def _run_vault_round(
+    def _run_wiki_round(
         self,
         events: list[EventEnvelope],
         results: list[IntakeResult],
     ) -> RoundResult | None:
-        """Feed successfully-kept turns to AlephRound for vault consolidation.
+        """Feed successfully-kept turns to AlephRound for wiki consolidation.
 
         Only includes turns that were kept by the LLM AND successfully
         written to MemPalace (have a drawer_id). This prevents orphan
-        vault entries for turns that failed to write.
+        wiki entries for turns that failed to write.
 
-        Returns the RoundResult, or None if vault is not configured or
+        Returns the RoundResult, or None if Aleph is not configured or
         no turns qualify.
         """
         if self._round is None:
@@ -310,15 +310,15 @@ class IntakeProcessor:
         try:
             return self._round.process(kept_turns)
         except Exception as exc:
-            _logger.error("itsme intake: vault round failed: %s", exc)
+            _logger.error("itsme intake: wiki round failed: %s", exc)
             return None
 
-    def _emit_vault_events(self, round_result: RoundResult) -> None:
-        """Emit wiki.promoted events for vault page operations."""
+    def _emit_wiki_events(self, round_result: RoundResult) -> None:
+        """Emit wiki.promoted events for wiki page operations."""
         if round_result.pages_created > 0 or round_result.pages_updated > 0:
             self._bus.emit(
                 type=EventType.WIKI_PROMOTED,
-                source="worker:intake:vault-round",
+                source="worker:intake:wiki-round",
                 payload={
                     "pages_created": round_result.pages_created,
                     "pages_updated": round_result.pages_updated,

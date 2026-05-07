@@ -1,9 +1,9 @@
-"""AlephVault — read/write adapter for the Obsidian Aleph vault.
+"""Aleph wiki — read/write adapter for the Obsidian knowledge wiki.
 
-The Aleph vault is a Karpathy-style LLM Wiki stored as plain markdown
-files in an Obsidian vault. This adapter handles the mechanical parts:
+Aleph is a Karpathy-style LLM Wiki stored as plain markdown files in
+an Obsidian wiki. This adapter handles the mechanical parts:
 
-- Read vault structure (dna.md wings, index.md catalog)
+- Read wiki structure (dna.md wings, index.md catalog)
 - Search existing pages (frontmatter + full text)
 - Write/update pages following dna.md conventions
 - Maintain index.md and log.md
@@ -12,7 +12,7 @@ It does NOT handle LLM-powered decisions (which entities to extract,
 whether to create vs update). That's the job of the intake/round
 pipeline that sits above this adapter.
 
-Vault layout::
+Layout::
 
     ~/Documents/Aleph/
     ├── CLAUDE.md
@@ -47,7 +47,7 @@ _logger = logging.getLogger(__name__)
 class PageMeta:
     """Parsed frontmatter of an Aleph wiki page."""
 
-    path: Path  # relative to vault root, e.g. wings/technology/ai/rag.md
+    path: Path  # relative to Aleph root, e.g. wings/technology/ai/rag.md
     title: str
     type: str  # concept | person | project | decision
     domain: str  # technology | life | financial | gossip | work
@@ -65,7 +65,7 @@ class PageMeta:
 
 @dataclass(frozen=True)
 class PageHit:
-    """A search result from the vault."""
+    """A search result from the wiki."""
 
     meta: PageMeta
     score: float  # 0.0 – 1.0
@@ -83,21 +83,21 @@ class IndexEntry:
     date: str
 
 
-# ------------------------------------------------------------------ vault
+# ------------------------------------------------------------------ Aleph
 
 
-class AlephVault:
-    """Read/write adapter for the Obsidian Aleph vault.
+class Aleph:
+    """Read/write adapter for the Obsidian Aleph knowledge wiki.
 
     Args:
-        vault_path: Absolute path to the vault root
+        root: Absolute path to the Aleph root directory
             (the directory containing ``dna.md``).
     """
 
-    def __init__(self, vault_path: str | Path) -> None:
-        self._root = Path(vault_path).expanduser().resolve()
+    def __init__(self, root: str | Path) -> None:
+        self._root = Path(root).expanduser().resolve()
         if not (self._root / "dna.md").exists():
-            raise FileNotFoundError(f"Not an Aleph vault (dna.md missing): {self._root}")
+            raise FileNotFoundError(f"Not an Aleph wiki (dna.md missing): {self._root}")
         self._wings_dir = self._root / "wings"
         self._sources_dir = self._root / "sources"
 
@@ -108,15 +108,16 @@ class AlephVault:
     # ------------------------------------------------------- path safety
 
     def _safe_resolve(self, path: Path) -> Path:
-        """Resolve *path* and verify it stays within the vault root.
+        """Resolve *path* and verify it stays within the Aleph root.
 
-        Raises ValueError if the resolved path escapes the vault
+        Raises ValueError if the resolved path escapes the wiki
         (e.g. via ``../`` segments or symlinks).
         """
         resolved = path.resolve()
         if not str(resolved).startswith(str(self._root.resolve())):
             raise ValueError(
-                f"Path escapes vault: {path} resolves to {resolved} " f"(vault root: {self._root})"
+                f"Path escapes Aleph root: {path} resolves to {resolved} "
+                f"(root: {self._root})"
             )
         return resolved
 
@@ -275,7 +276,7 @@ class AlephVault:
         frontmatter: dict[str, Any],
         body: str,
     ) -> Path:
-        """Create a new wiki page. Returns the path relative to vault root.
+        """Create a new wiki page. Returns the path relative to the wiki root.
 
         Creates the subcategory directory if it doesn't exist.
         Raises FileExistsError if the page already exists (use update_page).
@@ -486,3 +487,7 @@ class AlephVault:
 def _sanitize_cell(value: str) -> str:
     """Collapse newlines and escape pipes in a markdown table cell."""
     return value.replace("\n", " ").replace("\r", " ").replace("|", "\\|").strip()
+
+
+# Backward-compat alias (will be removed in v0.1.0)
+AlephVault = Aleph
