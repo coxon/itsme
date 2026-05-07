@@ -108,22 +108,22 @@
 
 #### Pre-intake — 结构性清洗（无 LLM）
 
-- [ ] **T2.0a** **Envelope 过滤**：regex 去掉 CC 注入的 `<local-command-caveat>` / `<command-name>` / `<command-message>` / `<command-args>` / `<local-command-stdout>` 五件套块。实现为 `core/filters/envelope.py`，可独立开关。**只过滤 hook capture，不过滤 explicit `remember()`**。
-- [ ] **T2.0b** **Turn 切片**：hook capture 从 "整段 transcript tail → 一个 `raw.captured`" 改为按 user/assistant turn 切成多条 `raw.captured`，每条独立 `content_hash` 和 `producer_kind`。实现在 `hooks/_common.py` + `hooks/lifecycle.py`。
+- [x] **T2.0a** **Envelope 过滤**：regex 去掉 CC 注入的 `<local-command-caveat>` / `<command-name>` / `<command-message>` / `<command-args>` / `<local-command-stdout>` 五件套块。实现为 `core/filters/envelope.py`，可独立开关。**只过滤 hook capture，不过滤 explicit `remember()`**。
+- [x] **T2.0b** **Turn 切片**：hook capture 从 "整段 transcript tail → 一个 `raw.captured`" 改为按 user/assistant turn 切成多条 `raw.captured`，每条独立 `content_hash` 和 `producer_kind`。实现在 `hooks/_common.py` + `hooks/lifecycle.py`。
 
 #### LLM 基础设施
 
-- [ ] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `AnthropicProvider` 实现。支持 model 配置（`$ITSME_LLM_MODEL` 默认 Haiku 4.5，`$ITSME_LLM_PROMOTER_MODEL` 默认 Sonnet 4.6）。最小接口：`complete(system, messages) → str`。依赖 `anthropic` SDK（加入 `pyproject.toml` optional deps）。
+- [x] **T2.6** **LLM provider 抽象**（`core/llm.py`）：`LLMProvider` protocol + `AnthropicProvider` 实现。支持 model 配置（`$ITSME_LLM_MODEL` 默认 Haiku 4.5，`$ITSME_LLM_PROMOTER_MODEL` 默认 Sonnet 4.6）。最小接口：`complete(system, messages) → str`。依赖 `anthropic` SDK（加入 `pyproject.toml` optional deps）。
 
 #### Aleph Extraction Index（轻量 — 不含 wiki / vault）
 
-- [ ] **T2.1** `core/aleph/store/index.py`：sqlite schema + FTS5。`extractions` 表（id ULID, turn_id, raw_event_id, summary TEXT, entities JSON, claims JSON, source TEXT, created_at REAL）。`extractions_fts` 虚拟表（summary, entities, claims）。
-- [ ] **T2.2** `core/aleph/search.py`：FTS5 关键词搜索 → ranked `ExtractionHit` 列表。v0.0.2 不含 embedding。
-- [ ] **T2.3** `core/aleph/api.py`：对内 SDK — `write_extraction(...)` / `search(query, limit)` / `close()`。
+- [x] **T2.1** `core/aleph/store/index.py`：sqlite schema + FTS5。`extractions` 表（id ULID, turn_id, raw_event_id, summary TEXT, entities JSON, claims JSON, source TEXT, created_at REAL）。`extractions_fts` 虚拟表（summary, entities, claims）。
+- [x] **T2.2** `core/aleph/search.py`：FTS5 关键词搜索 → ranked `ExtractionHit` 列表。v0.0.2 不含 embedding。
+- [x] **T2.3** `core/aleph/api.py`：对内 SDK — `write_extraction(...)` / `search(query, limit)` / `close()`。
 
 #### Intake Pipeline（核心新增）
 
-- [ ] **T2.0d** **LLM intake processor**（`core/workers/intake.py`）：
+- [x] **T2.0d** **LLM intake processor**（`core/workers/intake.py`）：
   - 在 router 异步 consume loop 中运行（不阻塞 hook 进程的 15s 超时）
   - 消费结构性清洗 + turn 切片后的 `raw.captured` 批次
   - 一次 Haiku LLM 调用，批量处理所有 turn：
@@ -138,16 +138,16 @@
 
 #### MCP 升级
 
-- [ ] **T2.19** `ask(mode=auto)` **双引擎搜索**：并行查 `Aleph.search(q)` + `MemPalace.search(q)` → 合并去重（同 `turn_id` / `raw_event_id` 的结果合并为一条，Aleph 命中排前） → 返回。**这是 v0.0.2 的 ask 默认模式**。
-- [ ] **T2.20** `ask(mode=verbatim)` MemPalace only（行为不变）。
-- [ ] **T2.21** `ask(mode=wiki)` → `NotImplementedError`（wiki entry 在 v0.0.3）。
+- [x] **T2.19** `ask(mode=auto)` **双引擎搜索**：并行查 `Aleph.search(q)` + `MemPalace.search(q)` → 合并去重（同 `turn_id` / `raw_event_id` 的结果合并为一条，Aleph 命中排前） → 返回。**这是 v0.0.2 的 ask 默认模式**。
+- [x] **T2.20** `ask(mode=verbatim)` MemPalace only（行为不变）。
+- [x] **T2.21** `ask(mode=wiki)` → `NotImplementedError`（wiki entry 在 v0.0.3）。
 
 #### 验收
 
-- [ ] **T2.23** 端到端：聊一段 → `/exit` → intake 提取 → Aleph index 有记录 + MemPalace 有 per-turn drawer → `ask(mode=auto)` 命中 Aleph 精准 hit + MemPalace 兜底 hit。
-- [ ] **T2.24** **Aleph 漏提取回归测试**：构造 LLM intake 未提取的实体（e.g. 一句话中的次要地名），验证 MemPalace raw search 仍能命中。Pin 为 fixture。
-- [ ] **T2.25** **LLM 降级测试**：API key 未配 / API 不可用时 hook capture 仍正常存入 MemPalace，`ask(mode=verbatim)` 正常返回，不报错。
-- [ ] **T2.26** `status(format=feed)` 能看到 `raw.triaged` 事件（skip/keep 可观察）。
+- [x] **T2.23** 端到端：聊一段 → `/exit` → intake 提取 → Aleph index 有记录 + MemPalace 有 per-turn drawer → `ask(mode=auto)` 命中 Aleph 精准 hit + MemPalace 兜底 hit。
+- [x] **T2.24** **Aleph 漏提取回归测试**：构造 LLM intake 未提取的实体（e.g. 一句话中的次要地名），验证 MemPalace raw search 仍能命中。Pin 为 fixture。
+- [x] **T2.25** **LLM 降级测试**：API key 未配 / API 不可用时 hook capture 仍正常存入 MemPalace，`ask(mode=verbatim)` 正常返回，不报错。
+- [x] **T2.26** `status(format=feed)` 能看到 `raw.triaged` 事件（skip/keep 可观察）。
 
 **v0.0.2 完成定义**：hook capture → structural strip → turn slice → LLM intake → Aleph index + MemPalace 双存 → `ask(mode=auto)` 双路搜索命中。LLM 挂了也不丢数据。
 

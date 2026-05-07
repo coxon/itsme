@@ -261,12 +261,14 @@ per-turn 捕获会让 router/promoter 噪音爆炸。consolidation hook 只在**
 
 ```
 ask(q, mode, promote)
-  ├─ mode=now      → events.tail + 聚合
+  ├─ mode=now      → events.tail + 聚合 (v0.0.3+)
   ├─ mode=verbatim → MemPalace only
-  ├─ mode=wiki     → Aleph only
-  └─ mode=auto
-       ├─ promote=false → Aleph → miss → MemPalace
-       └─ promote=true  → BOTH → LLM.fuse → write back
+  ├─ mode=wiki     → Aleph wiki only (v0.0.3+)
+  └─ mode=auto     → dual_search(Aleph extraction + MemPalace raw)
+       ├─ Aleph hits first (high precision, LLM-extracted summaries)
+       ├─ MemPalace gap-fills (high recall, raw text)
+       ├─ dedup by drawer_id (same turn → Aleph wins)
+       └─ promote=true → BOTH → LLM.fuse → write back (v0.0.3+)
 ```
 
 ---
