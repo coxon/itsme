@@ -9,6 +9,14 @@ namespaces:
 This way a single MemPalace instance can hold drawers for many projects
 without itsme stepping on other consumers' wings, and ``status`` /
 ``ask`` can scope queries cleanly.
+
+Wiki embedding constants:
+
+    WIKI_WING = "aleph"      — well-known wing for wiki page embeddings
+    WIKI_ROOM = "room_wiki"  — room for wiki page chunks
+
+These live in a separate wing so project-scoped searches (``wing=wing_foo``)
+don't accidentally include wiki content in verbatim results.
 """
 
 from __future__ import annotations
@@ -18,6 +26,11 @@ import re
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _WING_PREFIX = "wing_"
 _ROOM_PREFIX = "room_"
+
+# Well-known namespace for wiki page embeddings (T3.11+).
+# Separate from project wings so verbatim searches don't mix in wiki content.
+WIKI_WING = "aleph"
+WIKI_ROOM = "room_wiki"
 
 
 def _slug(raw: str) -> str:

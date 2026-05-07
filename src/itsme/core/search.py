@@ -1,27 +1,30 @@
-"""Dual-engine search — wiki pages + MemPalace raw.
+"""Tri-leg search — wiki keyword + wiki embedding + MemPalace raw.
 
-Parallel search over Aleph wiki pages (consolidated knowledge) and
-MemPalace (raw verbatim memories). Results are merged and deduplicated.
+Three search legs over the knowledge store, merged and deduplicated:
 
-Design (T3.0 — SQLite FTS5 index removed):
-
-    ┌──────────────┐   ┌─────────────┐
-    │  Aleph Wiki  │   │  MemPalace  │
-    │  page search │   │   search    │
-    └──────┬───────┘   └──────┬──────┘
-           │                  │
-           └────────┬─────────┘
-                    ▼
-            merge + dedup
-                    │
-            ┌───────▼──────┐
-            │ SearchHit[]  │
-            └──────────────┘
+    ┌──────────────┐   ┌─────────────────┐   ┌─────────────┐
+    │  Aleph Wiki  │   │  Wiki Embedding │   │  MemPalace  │
+    │  keyword     │   │  (MemPalace)    │   │   raw       │
+    └──────┬───────┘   └────────┬────────┘   └──────┬──────┘
+           │                    │                    │
+           └──────────┬────────┴────────────────────┘
+                      ▼
+              merge + dedup
+                      │
+              ┌───────▼──────┐
+              │ SearchHit[]  │
+              └──────────────┘
 
 Merge rules:
 
-1. Wiki hits first (consolidated knowledge — LLM-curated pages).
-2. MemPalace gap-fills (high recall — raw text for everything).
+1. Wiki keyword hits first (consolidated knowledge — LLM-curated pages).
+2. Wiki embedding hits (semantic match — pages that keyword missed).
+3. MemPalace raw gap-fills (high recall — raw text for everything).
+
+Embedding leg (T3.11+): wiki pages are synced to MemPalace in the
+``aleph`` wing by IntakeProcessor. This allows ChromaDB embedding
+search to find pages that simple keyword matching misses (e.g.,
+"谁管产品" matching a page titled "海龙" with body "产品负责人").
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from itsme.core.adapters import MemPalaceAdapter, MemPalaceHit
+from itsme.core.adapters.naming import WIKI_WING
 from itsme.core.aleph.wiki import Aleph, PageHit
 
 _logger = logging.getLogger(__name__)
@@ -97,14 +101,22 @@ def dual_search(
 ) -> list[SearchHit]:
     """Search Aleph wiki pages and MemPalace.
 
-    If *aleph* is provided, also searches wiki pages in the Obsidian
-    wiki. Wiki hits are ranked first (consolidated knowledge).
+    Three search legs, merged in priority order:
+
+    1. **Wiki keyword** — Aleph page search (title/alias/summary/body).
+    2. **Wiki embedding** — MemPalace search in the ``aleph`` wing
+       (pages synced for embedding by :class:`IntakeProcessor`).
+       Catches semantic matches that keyword search misses.
+    3. **MemPalace raw** — verbatim conversation turns (high recall).
+
+    Wiki keyword and embedding hits are deduplicated by content
+    overlap before merging with raw hits.
 
     Args:
         query: Natural-language search query.
-        adapter: MemPalace backend for raw search.
-        aleph: Aleph wiki adapter for page search (None = skip).
-        wing: Optional wing filter for MemPalace scope.
+        adapter: MemPalace backend for raw + embedding search.
+        aleph: Aleph wiki adapter for keyword page search (None = skip).
+        wing: Optional wing filter for MemPalace raw scope.
         limit: Max total results to return.
 
     Returns:
@@ -114,7 +126,7 @@ def dual_search(
     if not query or not query.strip():
         return []
 
-    # -- Wiki search (consolidated knowledge, highest priority)
+    # -- Leg 1: Wiki keyword search (consolidated knowledge, highest priority)
     wiki_hits: list[PageHit] = []
     if aleph is not None:
         try:
@@ -122,7 +134,14 @@ def dual_search(
         except Exception as exc:
             _logger.warning("itsme dual_search: wiki search failed: %s", exc)
 
-    # -- MemPalace search (raw, high recall)
+    # -- Leg 2: Wiki embedding search (semantic match via MemPalace)
+    wiki_embed_hits: list[MemPalaceHit] = []
+    try:
+        wiki_embed_hits = adapter.search(query, limit=limit, wing=WIKI_WING)
+    except Exception as exc:
+        _logger.warning("itsme dual_search: wiki embedding search failed: %s", exc)
+
+    # -- Leg 3: MemPalace raw search (high recall)
     mp_hits: list[MemPalaceHit] = []
     try:
         mp_hits = adapter.search(query, limit=limit, wing=wing)
@@ -132,11 +151,31 @@ def dual_search(
     # -- Merge
     results: list[SearchHit] = []
 
-    # Wiki hits first (consolidated knowledge)
+    # Wiki keyword hits first (consolidated knowledge)
     for hit in wiki_hits:
         results.append(_page_hit_to_search_hit(hit))
 
-    # MemPalace gap-fills (high recall)
+    # Wiki embedding hits (deduplicated against keyword hits)
+    seen_content: set[str] = set()
+    for r in results:
+        # Use first 100 chars of content as dedup key
+        seen_content.add(r.content[:100])
+
+    for hit in wiki_embed_hits:
+        # Skip if this content was already found by keyword search
+        if hit.content[:100] in seen_content:
+            continue
+        seen_content.add(hit.content[:100])
+        results.append(
+            SearchHit(
+                kind="wiki",
+                ref=f"wiki:embed:{hit.drawer_id[:8]}",
+                content=hit.content,
+                score=hit.score,
+            )
+        )
+
+    # MemPalace raw gap-fills
     seen_drawer_ids: set[str] = set()
     for hit in mp_hits:
         if hit.drawer_id in seen_drawer_ids:

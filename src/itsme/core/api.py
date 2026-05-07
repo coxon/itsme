@@ -149,6 +149,12 @@ class Memory:
             aleph=self._aleph,
         )
 
+        # Bootstrap wiki embedding index — sync existing wiki pages to
+        # MemPalace so they're searchable via embedding from the start.
+        # For 31 pages this is ~31 writes, fast enough for startup.
+        if self._aleph is not None:
+            self._intake.sync_all_wiki_pages()
+
     # ------------------------------------------------------------------ remember
     def remember(
         self,

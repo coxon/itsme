@@ -49,6 +49,7 @@ class RoundResult:
     pages_updated: int = 0
     pages_skipped: int = 0
     errors: list[str] = field(default_factory=list)
+    slugs_affected: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -128,12 +129,14 @@ class AlephRound:
                 if action == "create":
                     self._execute_create(op, today)
                     result.pages_created += 1
+                    result.slugs_affected.append(op["slug"])
                     idx_entry = self._make_index_entry_from_page(op["slug"], today)
                     if idx_entry is not None:
                         new_index_entries.append(idx_entry)
                 elif action == "update":
                     self._execute_update(op, today)
                     result.pages_updated += 1
+                    result.slugs_affected.append(op["slug"])
                     idx_entry = self._make_index_entry_from_page(op["slug"], today)
                     if idx_entry is not None:
                         new_index_entries.append(idx_entry)

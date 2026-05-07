@@ -30,6 +30,7 @@ from importlib.resources import files as _files
 from typing import Any
 
 from itsme.core.adapters import MemPalaceAdapter
+from itsme.core.adapters.naming import WIKI_ROOM, WIKI_WING
 from itsme.core.adapters.naming import room as _room
 from itsme.core.aleph.round import AlephRound, RoundResult, TurnContent
 from itsme.core.aleph.wiki import Aleph
@@ -145,6 +146,8 @@ class IntakeProcessor:
         round_result = self._run_wiki_round(events, results)
         if round_result is not None:
             self._emit_wiki_events(round_result)
+            # Step 4: Sync affected wiki pages to MemPalace for embedding search
+            self._sync_wiki_embeddings(round_result.slugs_affected)
 
         return results
 
@@ -326,6 +329,67 @@ class IntakeProcessor:
                 },
             )
 
+    # ---------------------------------------------------------- wiki embeddings
+
+    def _sync_wiki_embeddings(self, slugs: list[str]) -> None:
+        """Write affected wiki pages to MemPalace for embedding search.
+
+        Each page is written to the well-known ``aleph`` wing with
+        ``room_wiki`` room so that ``dual_search`` can query them
+        separately from raw conversation turns.
+
+        Content format: ``title\\nsummary\\n\\nbody`` — gives the
+        embedding model full context for semantic matching.
+        """
+        if not slugs or self._aleph is None:
+            return
+
+        for slug in slugs:
+            try:
+                meta = self._aleph.find_page(slug)
+                if meta is None:
+                    continue
+                _, body = self._aleph.read_page(meta.path)
+                content = _wiki_page_for_embedding(meta.title, meta.summary, body)
+                self._adapter.write(
+                    content=content,
+                    wing=WIKI_WING,
+                    room=WIKI_ROOM,
+                    source_file=f"wiki:{slug}",
+                )
+            except Exception as exc:
+                _logger.warning("itsme intake: wiki embedding sync failed for %s: %s", slug, exc)
+
+    def sync_all_wiki_pages(self) -> int:
+        """Sync ALL wiki pages to MemPalace for embedding search.
+
+        Called once at startup to bootstrap the embedding index for
+        existing pages. Returns the number of pages synced.
+        """
+        if self._aleph is None:
+            return 0
+
+        pages = self._aleph.list_pages()
+        synced = 0
+        for meta in pages:
+            try:
+                _, body = self._aleph.read_page(meta.path)
+                content = _wiki_page_for_embedding(meta.title, meta.summary, body)
+                self._adapter.write(
+                    content=content,
+                    wing=WIKI_WING,
+                    room=WIKI_ROOM,
+                    source_file=f"wiki:{meta.path.stem}",
+                )
+                synced += 1
+            except Exception as exc:
+                _logger.warning(
+                    "itsme intake: wiki embedding sync failed for %s: %s", meta.path.stem, exc
+                )
+        if synced:
+            _logger.info("itsme intake: synced %d wiki pages to MemPalace for embedding", synced)
+        return synced
+
     # ---------------------------------------------------------- async loop
 
     async def consume_loop(
@@ -408,6 +472,24 @@ class IntakeProcessor:
             if env.payload.get("raw_event_id") == raw_event_id:
                 return True
         return False
+
+
+# --------------------------------------------------------------------- wiki embedding
+
+
+def _wiki_page_for_embedding(title: str, summary: str, body: str) -> str:
+    """Format a wiki page for embedding storage.
+
+    Concatenates title, summary, and body so the embedding model gets
+    full context for semantic matching. A query like "谁管产品" can match
+    a page titled "海龙" with body "产品负责人" via embedding similarity.
+    """
+    parts = [title]
+    if summary:
+        parts.append(summary)
+    if body:
+        parts.append(body)
+    return "\n\n".join(parts)
 
 
 # --------------------------------------------------------------------- parsing
