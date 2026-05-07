@@ -1,6 +1,6 @@
 [project]
 name = "itsme"
-version = "0.0.3"
+version = "0.0.1a0"
 description = "Long-term memory plugin for agent IDEs (remember / ask / status)"
 readme = "README.md"
 requires-python = ">=3.12"
