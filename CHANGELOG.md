@@ -15,7 +15,11 @@ Wiki 自成长：crosslink 回填 + refresh 去重 + curator 自动维护。
 - **Crosslink pipeline** (`core/aleph/pipeline/crosslink.py`): 全量扫描 wiki body，自动插入 `[[wikilink]]` 反向链接。first-occurrence-only、never-self-link、skip protected zones（fenced code / inline code / existing wikilinks / callouts）、longest-match-first（CJK 感知）、shield new links、idempotent。
 - **Refresh pipeline** (`core/aleph/pipeline/refresh.py`): 确定性去重（无 LLM）——精确重复段落移除（whitespace-normalized）、History 条目去重、空行折叠。Protected blocks 永不去重。
 - **Curator worker** (`core/workers/curator.py`): 每次 wiki round 后自动运行 refresh → crosslink，emit `memory.curated` 事件（`reason=crosslink` / `reason=refresh`）。支持 standalone + dry_run。已接入 IntakeProcessor 作为 Step 5。
-- **Status feed emoji**: 📥 raw / 🔀 route / 💾 store / ♻ dedup / 🔗 xlink / 🧹 clean / 🔍 query / 📝 wiki / ⚙ curat。summary line 新增 wiki/xlink/clean 桶。
+- **Semantic wiki page dedup** (`core/aleph/pipeline/dedup_pages.py`): 基于 MemPalace embedding 检测近似重复 wiki 页面，emit `memory.curated(reason=merge_candidate)`，仅报告不自动合并。自匹配过滤 + 对称去重。
+- **Invalidation detection** (T4.3): intake prompt 提取 `invalidations` 字段（subject/predicate/object/ended），`_apply_invalidations` 调用 `adapter.kg_invalidate()` 标记 KG 事实过期，emit `memory.curated(reason=invalidation)`。
+- `kg_invalidate()` 方法加入 `MemPalaceAdapter` Protocol、`InMemoryMemPalaceAdapter`、`StdioMemPalaceAdapter`。
+- `check_duplicate()` + `DuplicateMatch` 加入 adapter Protocol 和两个实现。
+- **Status feed emoji**: 📥 raw / 🔀 route / 💾 store / ♻ dedup / 🔗 xlink / 🧹 clean / ⚠ merge / ⏳ inval / 🔍 query / 📝 wiki / ⚙ curat。summary line 新增 wiki/xlink/clean/merge/inval 桶。
 - `wiki.promoted` 事件在 feed 中渲染。
 - `Aleph.extract_body()` 提升为公共 API。
 

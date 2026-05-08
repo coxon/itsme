@@ -410,6 +410,33 @@ class StdioMemPalaceAdapter:
         matches.sort(key=lambda m: m.similarity, reverse=True)
         return matches
 
+    def kg_invalidate(
+        self,
+        *,
+        subject: str,
+        predicate: str,
+        object: str,
+        ended: str | None = None,
+    ) -> bool:
+        """Mark a KG fact as no longer true via ``mempalace_kg_invalidate``."""
+        args: dict[str, Any] = {
+            "subject": subject,
+            "predicate": predicate,
+            "object": object,
+        }
+        if ended:
+            args["ended"] = ended
+        try:
+            result = self._call_tool("mempalace_kg_invalidate", args)
+            error = result.get("error")
+            if error:
+                _logger.warning("kg_invalidate failed: %s", error)
+                return False
+            return True
+        except Exception as exc:
+            _logger.warning("kg_invalidate error: %s", exc)
+            return False
+
     # ----------------------------------------------------------- internals
 
     def _initialize(self, *, timeout_s: float) -> None:

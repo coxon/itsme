@@ -66,8 +66,10 @@ class IntakeResult:
     summary: str
     entities: list[dict[str, str]]
     claims: list[str]
+    invalidations: list[dict[str, str]]
     skip_reason: str
     drawer_id: str  # MemPalace drawer id (always written)
+    invalidations_applied: int = 0  # how many kg_invalidate calls succeeded
 
 
 # --------------------------------------------------------------------- core
@@ -168,8 +170,8 @@ class IntakeProcessor:
         """Call LLM to extract structured data from turns.
 
         Returns one dict per event with keys: verdict, summary, entities,
-        claims, skip_reason. On LLM failure, returns skip-all with
-        reason "llm_unavailable".
+        claims, invalidations, skip_reason. On LLM failure, returns
+        skip-all with reason "llm_unavailable".
         """
         if self._degraded:
             return [
@@ -179,6 +181,7 @@ class IntakeProcessor:
                     "summary": "",
                     "entities": [],
                     "claims": [],
+                    "invalidations": [],
                 }
                 for _ in events
             ]
@@ -207,6 +210,7 @@ class IntakeProcessor:
                     "summary": "",
                     "entities": [],
                     "claims": [],
+                    "invalidations": [],
                 }
                 for _ in events
             ]
@@ -219,18 +223,20 @@ class IntakeProcessor:
                     "summary": "",
                     "entities": [],
                     "claims": [],
+                    "invalidations": [],
                 }
                 for _ in events
             ]
 
     def _write_and_emit(self, event: EventEnvelope, extraction: dict[str, Any]) -> IntakeResult:
-        """Write to MemPalace (always) + emit triaged event."""
+        """Write to MemPalace (always) + emit triaged event + apply invalidations."""
         content = event.payload.get("content", "")
         turn_role = event.payload.get("turn_role", "unknown")
         verdict = extraction.get("verdict", "skip")
         summary = extraction.get("summary", "")
         entities = extraction.get("entities", [])
         claims = extraction.get("claims", [])
+        invalidations = extraction.get("invalidations", [])
         skip_reason = extraction.get("skip_reason", "")
 
         # Route to a room based on turn_role
@@ -271,6 +277,7 @@ class IntakeProcessor:
                 "summary": summary[:200] if summary else "",
                 "entity_count": len(entities),
                 "claim_count": len(claims),
+                "invalidation_count": len(invalidations),
                 "skip_reason": skip_reason,
                 "drawer_id": drawer_id,
                 "wing": self._wing,
@@ -278,17 +285,87 @@ class IntakeProcessor:
             },
         )
 
+        # Apply KG invalidations if present
+        invalidations_applied = self._apply_invalidations(invalidations)
+
         return IntakeResult(
             turn_event_id=event.id,
             verdict=verdict,
             summary=summary,
             entities=entities,
             claims=claims,
+            invalidations=invalidations,
             skip_reason=skip_reason,
             drawer_id=drawer_id,
+            invalidations_applied=invalidations_applied,
         )
 
     # ---------------------------------------------------------- wiki round
+
+    def _apply_invalidations(self, invalidations: list[dict[str, str]]) -> int:
+        """Call ``kg_invalidate`` for each extracted invalidation.
+
+        Emits a ``memory.curated(reason="invalidation")`` event per
+        successful invalidation so the operator can see what was marked
+        stale. Returns the count of successfully applied invalidations.
+        """
+        if not invalidations:
+            return 0
+
+        applied = 0
+        for inv in invalidations:
+            if not isinstance(inv, dict):
+                continue
+            subject = inv.get("subject", "")
+            predicate = inv.get("predicate", "")
+            obj = inv.get("object", "")
+            ended = inv.get("ended")  # optional YYYY-MM-DD
+
+            if not subject or not predicate or not obj:
+                _logger.warning(
+                    "itsme intake: skipping incomplete invalidation: %s",
+                    inv,
+                )
+                continue
+
+            try:
+                ok = self._adapter.kg_invalidate(
+                    subject=subject,
+                    predicate=predicate,
+                    object=obj,
+                    ended=ended,
+                )
+                self._bus.emit(
+                    type=EventType.MEMORY_CURATED,
+                    source="worker:intake:invalidation",
+                    payload={
+                        "reason": "invalidation",
+                        "subject": subject,
+                        "predicate": predicate,
+                        "object": obj,
+                        "ended": ended or "",
+                        "applied": ok,
+                    },
+                )
+                if ok:
+                    applied += 1
+                _logger.info(
+                    "itsme intake: kg_invalidate(%s, %s, %s) → %s",
+                    subject,
+                    predicate,
+                    obj,
+                    "applied" if ok else "not found",
+                )
+            except Exception as exc:
+                _logger.error(
+                    "itsme intake: kg_invalidate failed for (%s, %s, %s): %s",
+                    subject,
+                    predicate,
+                    obj,
+                    exc,
+                )
+
+        return applied
 
     def _run_wiki_round(
         self,
@@ -557,6 +634,7 @@ def _parse_intake_response(raw: str, *, expected_count: int) -> list[dict[str, A
                 "summary": "",
                 "entities": [],
                 "claims": [],
+                "invalidations": [],
             }
         ] * expected_count
 
@@ -569,6 +647,7 @@ def _parse_intake_response(raw: str, *, expected_count: int) -> list[dict[str, A
                 "summary": "",
                 "entities": [],
                 "claims": [],
+                "invalidations": [],
             }
         ] * expected_count
 
@@ -583,6 +662,7 @@ def _parse_intake_response(raw: str, *, expected_count: int) -> list[dict[str, A
                     "summary": "",
                     "entities": [],
                     "claims": [],
+                    "invalidations": [],
                 }
             )
             continue
@@ -592,6 +672,7 @@ def _parse_intake_response(raw: str, *, expected_count: int) -> list[dict[str, A
                 "summary": item.get("summary", ""),
                 "entities": item.get("entities", []),
                 "claims": item.get("claims", []),
+                "invalidations": item.get("invalidations", []),
                 "skip_reason": item.get("skip_reason", ""),
             }
         )
@@ -605,6 +686,7 @@ def _parse_intake_response(raw: str, *, expected_count: int) -> list[dict[str, A
                 "summary": "",
                 "entities": [],
                 "claims": [],
+                "invalidations": [],
             }
         )
 
