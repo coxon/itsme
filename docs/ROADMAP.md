@@ -217,12 +217,12 @@
 - [ ] **T4.0c** 验收：wiki 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
 
 #### Curator
-- [ ] **T4.1** 定时任务调度（每 N 分钟 / 每 session 末）
-- [ ] **T4.2** 重复检测（依赖 MemPalace 已有 `check_duplicate`）
+- [x] **T4.1** Curator worker（`core/workers/curator.py`）：每次 wiki round 后自动运行 refresh → crosslink。`Curator` class 支持 standalone（`bus=None`）+ dry_run。已接入 IntakeProcessor 作为 Step 5（process_batch → wiki round → embedding sync → curator）。错误 log 但不阻塞 intake pipeline。7 个测试。
+- [ ] **T4.2** 重复检测（依赖 MemPalace 已有 `check_duplicate`）— 需扩展 MemPalaceAdapter 接口
 - [ ] **T4.3** 失效模式识别（"我搬家了" / "项目结束了" 类语义）
-- [ ] **T4.4** 调 KG.invalidate
+- [ ] **T4.4** 调 KG.invalidate — 需扩展 MemPalaceAdapter 接口
 - [ ] **T4.5** Aleph wiki 页面也能被 invalidate（frontmatter 加 `superseded_by`）
-- [ ] **T4.6** emit `memory.curated`
+- [x] **T4.6** emit `memory.curated`：`source=worker:curator`，`reason=crosslink` 或 `reason=refresh`，payload 含 pages_modified / links_inserted / paragraphs_removed。dry_run 或无变更时不 emit。
 
 #### Skill 文档
 - [ ] **T4.7** `skills/itsme.md` 主 skill 文档（角色、能力、边界）
