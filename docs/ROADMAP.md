@@ -212,8 +212,8 @@
 
 #### Crosslink & 自成长（从 v0.0.3 推迟）
 
-- [ ] **T4.0** `core/aleph/pipeline/crosslink.py`：全量扫描 wiki body，自动插入 `[[wikilink]]`（目前 LLM 在 round prompt 中生成 `related: [[...]]`，但没有回填已有页面的 body 引用）
-- [ ] **T4.0b** `core/aleph/pipeline/refresh.py`：去重段落、清冗余（同一实体从多个 session 写入可能产生重复段落）
+- [x] **T4.0** `core/aleph/pipeline/crosslink.py`：全量扫描 wiki body，自动插入 `[[wikilink]]`（目前 LLM 在 round prompt 中生成 `related: [[...]]`，但没有回填已有页面的 body 引用）。设计规则：first-occurrence-only、never-self-link、skip protected zones（fenced code / inline code / existing [[]] / callouts）、longest-match-first（CJK 感知）、shield new links（防子串泄漏）、idempotent + dry_run。29 个测试。
+- [x] **T4.0b** `core/aleph/pipeline/refresh.py`：去重段落、清冗余（同一实体从多个 session 写入可能产生重复段落）。确定性、无 LLM：exact-duplicate paragraph removal（whitespace-normalized）、History entry dedup、blank-line collapse。Protected blocks（code / callouts）永不去重。23 个测试。
 - [ ] **T4.0c** 验收：wiki 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
 
 #### Curator

@@ -265,6 +265,9 @@ Aleph 不是外部服务，而是 itsme 进程内的一个**模块**（`core/ale
 core/aleph/
 ├── wiki.py           # Wiki 读写 + keyword 搜索（Aleph class）
 ├── round.py          # AlephRound — LLM 驱动的 create/update 决策
+├── pipeline/
+│   ├── crosslink.py  # Auto-insert [[wikilink]] backlinks (T4.0)
+│   └── refresh.py    # Dedup paragraphs + history entries (T4.0b)
 └── prompts/
     ├── intake.md     # per-turn extraction prompt
     └── round.md      # wiki page create/update prompt
@@ -501,6 +504,9 @@ itsme/                                  # git repo root
 │       │   ├── aleph/
 │       │   │   ├── wiki.py             # Aleph class: read/write/search pages
 │       │   │   ├── round.py            # AlephRound: LLM wiki consolidation
+│       │   │   ├── pipeline/
+│       │   │   │   ├── crosslink.py    # Auto-insert [[wikilink]] backlinks
+│       │   │   │   └── refresh.py      # Dedup paragraphs + history entries
 │       │   │   └── prompts/
 │       │   │       ├── intake.md       # per-turn extraction prompt
 │       │   │       └── round.md        # wiki page create/update prompt
