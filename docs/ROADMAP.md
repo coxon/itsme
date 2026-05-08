@@ -218,7 +218,7 @@
 
 #### Curator
 - [x] **T4.1** Curator worker（`core/workers/curator.py`）：每次 wiki round 后自动运行 refresh → crosslink。`Curator` class 支持 standalone（`bus=None`）+ dry_run。已接入 IntakeProcessor 作为 Step 5（process_batch → wiki round → embedding sync → curator）。错误 log 但不阻塞 intake pipeline。7 个测试。
-- [ ] **T4.2** 重复检测（依赖 MemPalace 已有 `check_duplicate`）— 需扩展 MemPalaceAdapter 接口
+- [x] **T4.2** 语义重复检测：`MemPalaceAdapter.check_duplicate()` 扩展 + `core/aleph/pipeline/dedup_pages.py`。扫描 wiki 页面对，过滤自匹配，报告跨页重复候选（`MergeCandidate`）。不自动合并——emit `memory.curated(reason="merge_candidate")`。Curator Step 3（refresh → crosslink → dedup）。12 个新测试。
 - [ ] **T4.3** 失效模式识别（"我搬家了" / "项目结束了" 类语义）
 - [ ] **T4.4** 调 KG.invalidate — 需扩展 MemPalaceAdapter 接口
 - [ ] **T4.5** Aleph wiki 页面也能被 invalidate（frontmatter 加 `superseded_by`）

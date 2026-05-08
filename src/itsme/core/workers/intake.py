@@ -117,7 +117,11 @@ class IntakeProcessor:
 
         # Build Curator for post-round wiki maintenance
         if aleph is not None:
-            self._curator: Curator | None = Curator(aleph=aleph, bus=bus)
+            self._curator: Curator | None = Curator(
+                aleph=aleph,
+                bus=bus,
+                adapter=adapter,
+            )
         else:
             self._curator = None
 
