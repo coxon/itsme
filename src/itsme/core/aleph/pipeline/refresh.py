@@ -185,9 +185,7 @@ def refresh(aleph: Aleph, *, dry_run: bool = False) -> RefreshResult:
                 detail_parts.append(f"{page_para_removed} para")
             if page_hist_removed:
                 detail_parts.append(f"{page_hist_removed} hist")
-            result.details.append(
-                f"{page.path.stem}: -{', '.join(detail_parts)}"
-            )
+            result.details.append(f"{page.path.stem}: -{', '.join(detail_parts)}")
             _logger.info(
                 "refresh: %s — removed %d paragraphs, %d history dupes",
                 page.path.stem,
@@ -203,8 +201,7 @@ def refresh(aleph: Aleph, *, dry_run: bool = False) -> RefreshResult:
                 full_path.write_text(new_text, encoding="utf-8")
 
     _logger.info(
-        "refresh: scanned %d pages, modified %d, "
-        "removed %d paragraphs + %d history dupes",
+        "refresh: scanned %d pages, modified %d, " "removed %d paragraphs + %d history dupes",
         result.pages_scanned,
         result.pages_modified,
         result.paragraphs_removed,

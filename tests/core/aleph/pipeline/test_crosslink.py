@@ -117,13 +117,17 @@ class TestBuildTargetMap:
             PageMeta(
                 path=Path("wings/work/projects/starmap.md"),
                 title="星图",
-                type="project", domain="work", subcategory="projects",
+                type="project",
+                domain="work",
+                subcategory="projects",
                 summary="",
             ),
             PageMeta(
                 path=Path("wings/work/projects/starmap-plan.md"),
                 title="星图计划",
-                type="project", domain="work", subcategory="projects",
+                type="project",
+                domain="work",
+                subcategory="projects",
                 summary="",
             ),
         ]
@@ -137,8 +141,11 @@ class TestBuildTargetMap:
             PageMeta(
                 path=Path("wings/tech/ai/rag.md"),
                 title="RAG",
-                type="concept", domain="technology", subcategory="ai",
-                summary="", aliases=["retrieval augmented generation"],
+                type="concept",
+                domain="technology",
+                subcategory="ai",
+                summary="",
+                aliases=["retrieval augmented generation"],
             ),
         ]
         targets = _build_target_map(pages)
@@ -152,13 +159,17 @@ class TestBuildTargetMap:
             PageMeta(
                 path=Path("wings/a/b/foo.md"),
                 title="Foo",
-                type="concept", domain="a", subcategory="b",
+                type="concept",
+                domain="a",
+                subcategory="b",
                 summary="",
             ),
             PageMeta(
                 path=Path("wings/a/b/bar.md"),
                 title="Foo",  # same title as above
-                type="concept", domain="a", subcategory="b",
+                type="concept",
+                domain="a",
+                subcategory="b",
                 summary="",
             ),
         ]

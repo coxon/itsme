@@ -50,8 +50,7 @@ _PROTECTED_RE = re.compile(
     r"```[\s\S]*?```"  # fenced code blocks
     r"|`[^`\n]+`"  # inline code
     r"|\[\[[^\]]*\]\]"  # existing [[wikilinks]]
-    r"|> \[!.*?\].*?(?=\n[^>]|\n\n|\Z)"  # Obsidian callout blocks (single)
-    ,
+    r"|> \[!.*?\].*?(?=\n[^>]|\n\n|\Z)",  # Obsidian callout blocks (single)
     re.MULTILINE,
 )
 
@@ -77,6 +76,7 @@ def _shield_protected(body: str) -> tuple[str, list[str]]:
 
 def _unshield(body: str, originals: list[str]) -> str:
     """Restore placeholders back to their original text."""
+
     def _restore(m: re.Match[str]) -> str:
         idx = int(m.group(1))
         return originals[idx]
@@ -199,7 +199,7 @@ def _crosslink_body(
             placeholder = _PLACEHOLDER.format(idx)
 
             # Replace only the first occurrence
-            shielded = shielded[:m.start()] + placeholder + shielded[m.end():]
+            shielded = shielded[: m.start()] + placeholder + shielded[m.end() :]
             linked_slugs.add(slug)
             count += 1
 
@@ -248,9 +248,7 @@ def crosslink(aleph: Aleph, *, dry_run: bool = False) -> CrosslinkResult:
         if count > 0:
             result.pages_modified += 1
             result.links_inserted += count
-            result.details.append(
-                f"{page.path.stem}: +{count} links"
-            )
+            result.details.append(f"{page.path.stem}: +{count} links")
             _logger.info(
                 "crosslink: %s — inserted %d wikilinks",
                 page.path.stem,

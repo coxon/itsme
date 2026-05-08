@@ -157,21 +157,14 @@ class TestDedupHistory:
         assert count == 0
 
     def test_preserves_non_list_lines(self) -> None:
-        body = (
-            "## History\n"
-            "Some intro.\n"
-            "- 2026-05-01 创建\n"
-            "- 2026-05-01 创建\n"
-        )
+        body = "## History\n" "Some intro.\n" "- 2026-05-01 创建\n" "- 2026-05-01 创建\n"
         new_body, count = _dedup_history(body)
         assert count == 1
         assert "Some intro." in new_body
 
     def test_whitespace_normalized(self) -> None:
         body = (
-            "## History\n"
-            "- 2026-05-01  创建，来源:  itsme\n"
-            "- 2026-05-01 创建，来源: itsme\n"
+            "## History\n" "- 2026-05-01  创建，来源:  itsme\n" "- 2026-05-01 创建，来源: itsme\n"
         )
         new_body, count = _dedup_history(body)
         assert count == 1
