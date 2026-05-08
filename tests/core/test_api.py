@@ -290,6 +290,7 @@ def test_default_backend_is_auto(monkeypatch: pytest.MonkeyPatch) -> None:
         StdioMemPalaceAdapter,
     )
     from itsme.core.adapters.mempalace_stdio import MemPalaceConnectError
+    from itsme.core.config import load_config
 
     monkeypatch.delenv("ITSME_MEMPALACE_BACKEND", raising=False)
     # Force ``from_env`` to fail so we land in the warn-and-fallback branch.
@@ -302,7 +303,8 @@ def test_default_backend_is_auto(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         ),
     )
-    adapter = api_mod._select_mempalace_backend()  # noqa: SLF001
+    cfg = load_config(skip_file=True)
+    adapter = api_mod._select_mempalace_backend(cfg)  # noqa: SLF001
     assert isinstance(adapter, InMemoryMemPalaceAdapter)
 
 
@@ -310,16 +312,20 @@ def test_explicit_inmemory_backend_skips_stdio(monkeypatch: pytest.MonkeyPatch) 
     """``ITSME_MEMPALACE_BACKEND=inmemory`` must not import / spawn stdio."""
     from itsme.core import api as api_mod
     from itsme.core.adapters import InMemoryMemPalaceAdapter
+    from itsme.core.config import load_config
 
     monkeypatch.setenv("ITSME_MEMPALACE_BACKEND", "inmemory")
-    adapter = api_mod._select_mempalace_backend()  # noqa: SLF001
+    cfg = load_config(skip_file=True)
+    adapter = api_mod._select_mempalace_backend(cfg)  # noqa: SLF001
     assert isinstance(adapter, InMemoryMemPalaceAdapter)
 
 
 def test_unknown_backend_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Typos must surface, not silently fall through."""
     from itsme.core import api as api_mod
+    from itsme.core.config import load_config
 
     monkeypatch.setenv("ITSME_MEMPALACE_BACKEND", "wishful-thinking")
+    cfg = load_config(skip_file=True)
     with pytest.raises(ValueError, match="unknown ITSME_MEMPALACE_BACKEND"):
-        api_mod._select_mempalace_backend()  # noqa: SLF001
+        api_mod._select_mempalace_backend(cfg)  # noqa: SLF001

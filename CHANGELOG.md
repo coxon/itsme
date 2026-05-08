@@ -20,6 +20,7 @@ Wiki 自成长：crosslink 回填 + refresh 去重 + curator 自动维护。
 - `kg_invalidate()` 方法加入 `MemPalaceAdapter` Protocol、`InMemoryMemPalaceAdapter`、`StdioMemPalaceAdapter`。
 - `check_duplicate()` + `DuplicateMatch` 加入 adapter Protocol 和两个实现。
 - **Status feed emoji**: 📥 raw / 🔀 route / 💾 store / ♻ dedup / 🔗 xlink / 🧹 clean / ⚠ merge / ⏳ inval / 🔍 query / 📝 wiki / ⚙ curat。summary line 新增 wiki/xlink/clean/merge/inval 桶。
+- **Centralised config** (`core/config.py`): `Config` frozen dataclass + `load_config()` 三层合并（env var → `~/.itsme/config.toml` → 默认值）。散落在代码各处的 `os.environ.get` 收敛到一个模块。含 `docs/config.example.toml` 示例。
 - `wiki.promoted` 事件在 feed 中渲染。
 - `Aleph.extract_body()` 提升为公共 API。
 

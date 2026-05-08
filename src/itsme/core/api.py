@@ -31,6 +31,7 @@ from itsme.core.adapters import (
 )
 from itsme.core.adapters.naming import wing as _wing
 from itsme.core.aleph.wiki import Aleph
+from itsme.core.config import Config
 from itsme.core.dedup import content_hash, producer_kind_from_source
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.llm import LLMProvider, StubProvider, build_llm_provider
@@ -573,12 +574,18 @@ def build_default_memory(
     adapter: MemPalaceAdapter | None = None,
     llm: LLMProvider | None = None,
     aleph: Aleph | None = None,
+    cfg: Config | None = None,
 ) -> Memory:
     """Construct a :class:`Memory` with sensible defaults.
 
     Used by ``itsme.mcp.server`` to wire up a Memory instance from
     config without leaking pydantic / sqlite plumbing into the MCP
     layer.
+
+    When *cfg* is provided, settings are read from the centralised
+    :class:`Config` object (env vars → config file → defaults).
+    When omitted, a fresh :func:`load_config` is called so existing
+    callers keep working unchanged.
 
     If *llm* is not passed, :func:`build_llm_provider` is called to
     auto-detect from ``$DEEPSEEK_API_KEY``. If no key is set, intake
@@ -602,11 +609,19 @@ def build_default_memory(
     """
     import sys
 
-    bus = EventBus(db_path=db_path or default_db_path(), capacity=capacity)
+    from itsme.core.config import load_config
+
+    if cfg is None:
+        cfg = load_config()
+
+    resolved_db = db_path or Path(cfg.db_path).expanduser()
+    resolved_project = project if project != "default" else cfg.project
+
+    bus = EventBus(db_path=resolved_db, capacity=capacity)
     if adapter is None:
-        adapter = _select_mempalace_backend()
+        adapter = _select_mempalace_backend(cfg)
     if llm is None:
-        llm = build_llm_provider()
+        llm = build_llm_provider(cfg=cfg)
         if llm is None:
             print(
                 "itsme: no DEEPSEEK_API_KEY set — intake runs in degraded mode "
@@ -615,30 +630,27 @@ def build_default_memory(
                 file=sys.stderr,
             )
     if aleph is None:
-        aleph = _discover_aleph()
+        aleph = _discover_aleph(cfg)
     return Memory(
         bus=bus,
         adapter=adapter,
-        project=project,
+        project=resolved_project,
         llm=llm,
         aleph=aleph,
     )
 
 
-def _select_mempalace_backend() -> MemPalaceAdapter:
-    """Pick a MemPalace backend based on ``$ITSME_MEMPALACE_BACKEND``.
+def _select_mempalace_backend(cfg: Config) -> MemPalaceAdapter:
+    """Pick a MemPalace backend based on ``cfg.mempalace_backend``.
 
     Kept as a separate helper so tests can monkeypatch the env var and
     re-call ``build_default_memory`` without reaching into module state.
     """
-    import os
     import sys
 
-    backend = os.environ.get("ITSME_MEMPALACE_BACKEND", "auto").strip().lower()
+    backend = cfg.mempalace_backend.strip().lower()
 
     if backend == "" or backend == "auto":
-        # Lazy import: don't pay the subprocess-adapter import cost for
-        # callers that explicitly opt out (``inmemory``).
         from itsme.core.adapters.mempalace_stdio import (
             MemPalaceConnectError,
             StdioMemPalaceAdapter,
@@ -664,30 +676,24 @@ def _select_mempalace_backend() -> MemPalaceAdapter:
 
         return StdioMemPalaceAdapter.from_env()
 
-    # Unknown value → refuse silently would hide typos; loud is better.
     raise ValueError(
         f"unknown ITSME_MEMPALACE_BACKEND={backend!r} " "(expected one of: auto, inmemory, stdio)"
     )
 
 
-def _discover_aleph() -> Aleph | None:
+def _discover_aleph(cfg: Config) -> Aleph | None:
     """Auto-discover the Obsidian Aleph wiki.
 
-    Checks ``$ITSME_ALEPH_ROOT`` (or legacy ``$ITSME_ALEPH_VAULT``)
-    first, then falls back to ``~/Documents/Aleph/``. Returns None if
-    no Aleph wiki is found (wiki integration is optional — just means
-    no wiki writes or wiki search).
+    Checks ``cfg.aleph_root`` first, then falls back to
+    ``~/Documents/Aleph/``. Returns None if no Aleph wiki is found
+    (wiki integration is optional — just means no wiki writes or
+    wiki search).
     """
-    import os
     import sys
 
-    # Support both new ($ITSME_ALEPH_ROOT) and legacy ($ITSME_ALEPH_VAULT)
-    env_path = os.environ.get("ITSME_ALEPH_ROOT", "").strip()
-    if not env_path:
-        env_path = os.environ.get("ITSME_ALEPH_VAULT", "").strip()
     candidates: list[Path] = []
-    if env_path:
-        candidates.append(Path(env_path).expanduser())
+    if cfg.aleph_root:
+        candidates.append(Path(cfg.aleph_root).expanduser())
     candidates.append(Path.home() / "Documents" / "Aleph")
 
     for candidate in candidates:

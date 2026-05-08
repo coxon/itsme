@@ -1,0 +1,31 @@
+# itsme configuration — ~/.itsme/config.toml
+#
+# All settings are optional. Environment variables override this file.
+# Omitted keys use built-in defaults.
+
+[storage]
+# db_path = "~/.itsme/events.db"
+# project = "default"
+# mempalace_backend = "auto"          # auto | stdio | inmemory
+# mempalace_command = "python3 -m mempalace.mcp_server"
+# mempalace_handshake_timeout = 10.0  # seconds
+# mempalace_call_timeout = 30.0       # seconds
+
+[aleph]
+# root = "~/Documents/Aleph"          # Obsidian vault path
+
+[llm]
+# model = "deepseek-chat"
+# base_url = "https://api.deepseek.com"
+# max_tokens = 2048
+# api_key = "sk-..."                  # prefer $DEEPSEEK_API_KEY env var
+
+[thresholds]
+# dedup = 0.85                        # semantic dedup similarity threshold (0–1)
+
+[hooks]
+# disabled = false
+# ctx_threshold = 0.70                # context pressure trigger (0–1)
+# ctx_max_tokens = 200000
+# snapshot_chars = 10000
+# state_dir = "~/.itsme/state"
