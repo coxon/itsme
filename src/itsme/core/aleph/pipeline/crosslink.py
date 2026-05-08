@@ -154,12 +154,27 @@ def _crosslink_body(
     # Shield protected regions
     shielded, originals = _shield_protected(body)
 
+    # Pre-scan: which slugs already have [[slug...]] links in the body?
+    # If a page already links to a target (e.g. [[xai|xAI]]), we skip
+    # ALL remaining plain-text occurrences of that target — the page
+    # already references it, adding more links is noise.
+    already_linked: set[str] = set()
+    for orig in originals:
+        if orig.startswith("[["):
+            # Extract slug from [[slug]] or [[slug|display]]
+            inner = orig[2:].rstrip("]")
+            link_slug = inner.split("|")[0]
+            already_linked.add(link_slug)
+
     count = 0
     linked_slugs: set[str] = set()
 
     for match_text, slug, display in targets:
         # Never self-link
         if slug == self_slug:
+            continue
+        # Skip if page already links to this target
+        if slug in already_linked:
             continue
         # Only first occurrence per target
         if slug in linked_slugs:

@@ -216,12 +216,16 @@ class TestCrosslinkBody:
         # Remaining occurrences stay plain
         assert new_body.count("海龙") == 3  # 1 in link + 2 plain
 
-    def test_skip_existing_wikilink(self) -> None:
+    def test_skip_when_already_linked(self) -> None:
+        """When a [[slug...]] link already exists, don't add more."""
         targets = [("海龙", "hai-long", "海龙")]
         body = "已经有 [[hai-long|海龙]] 链接。以及海龙另外说了。"
         new_body, count = _crosslink_body(body, targets=targets, self_slug="other")
-        # The second "海龙" should be linked, the first is protected
-        assert count == 1
+        # Already linked → skip all plain-text occurrences
+        assert count == 0
+        # Both occurrences remain as-is
+        assert "[[hai-long|海龙]]" in new_body
+        assert new_body.count("海龙") == 2  # 1 in existing link + 1 plain
 
     def test_skip_code_block(self) -> None:
         targets = [("foo", "foo-page", "foo")]
