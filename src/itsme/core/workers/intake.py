@@ -36,6 +36,7 @@ from itsme.core.aleph.round import AlephRound, RoundResult, TurnContent
 from itsme.core.aleph.wiki import Aleph
 from itsme.core.events import EventBus, EventEnvelope, EventType
 from itsme.core.llm import LLMProvider, LLMUnavailableError, StubProvider
+from itsme.core.workers.curator import Curator
 
 _logger = logging.getLogger(__name__)
 
@@ -114,6 +115,12 @@ class IntakeProcessor:
         else:
             self._round = None
 
+        # Build Curator for post-round wiki maintenance
+        if aleph is not None:
+            self._curator: Curator | None = Curator(aleph=aleph, bus=bus)
+        else:
+            self._curator = None
+
     def process_batch(self, events: list[EventEnvelope]) -> list[IntakeResult]:
         """Process a batch of per-turn raw.captured events.
 
@@ -148,6 +155,8 @@ class IntakeProcessor:
             self._emit_wiki_events(round_result)
             # Step 4: Sync affected wiki pages to MemPalace for embedding search
             self._sync_wiki_embeddings(round_result.slugs_affected)
+            # Step 5: Post-round curator — crosslink + refresh
+            self._run_curator()
 
         return results
 
@@ -330,6 +339,24 @@ class IntakeProcessor:
             )
 
     # ---------------------------------------------------------- wiki embeddings
+
+    def _run_curator(self) -> None:
+        """Run post-round curator for crosslink + refresh.
+
+        Called after each successful wiki round. Errors are logged
+        but never block the intake pipeline.
+        """
+        if self._curator is None:
+            return
+        try:
+            result = self._curator.run()
+            if result.total_changes:
+                _logger.info(
+                    "itsme intake: curator made %d changes post-round",
+                    result.total_changes,
+                )
+        except Exception as exc:
+            _logger.error("itsme intake: curator failed: %s", exc)
 
     def _sync_wiki_embeddings(self, slugs: list[str]) -> None:
         """Write affected wiki pages to MemPalace for embedding search.
