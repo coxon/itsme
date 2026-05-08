@@ -6,4 +6,4 @@ Internal engines: MemPalace (verbatim) + Aleph (wiki).
 See docs/ARCHITECTURE.md for design.
 """
 
-__version__ = "0.0.1a0"
+__version__ = "0.0.4"
