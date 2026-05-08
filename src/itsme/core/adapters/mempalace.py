@@ -102,6 +102,27 @@ class MemPalaceAdapter(Protocol):
         """
         ...
 
+    def kg_invalidate(
+        self,
+        *,
+        subject: str,
+        predicate: str,
+        object: str,
+        ended: str | None = None,
+    ) -> bool:
+        """Mark a KG fact as no longer true.
+
+        Args:
+            subject: Entity (e.g. "user").
+            predicate: Relationship (e.g. "lives_in").
+            object: Connected entity (e.g. "Beijing").
+            ended: When it stopped being true (YYYY-MM-DD). Defaults to today.
+
+        Returns:
+            True if the fact was found and invalidated, False otherwise.
+        """
+        ...
+
 
 # --------------------------------------------------------------------------
 # In-memory reference implementation
@@ -285,3 +306,14 @@ class InMemoryMemPalaceAdapter:
                 )
         matches.sort(key=lambda m: m.similarity, reverse=True)
         return matches
+
+    def kg_invalidate(
+        self,
+        *,
+        subject: str,
+        predicate: str,
+        object: str,
+        ended: str | None = None,
+    ) -> bool:
+        """No-op for in-memory backend (no KG). Always returns False."""
+        return False

@@ -155,6 +155,13 @@ def _render_payload(  # noqa: C901 — type-dispatch tree is simpler flat
         if reason == "merge_candidate":
             count = payload.get("count", 0)
             return ("⚠ merge", f"{count} duplicate page pair(s) detected")
+        if reason == "invalidation":
+            subj = payload.get("subject", "?")
+            pred = payload.get("predicate", "?")
+            obj = payload.get("object", "?")
+            applied = payload.get("applied", False)
+            mark = "✓" if applied else "○"
+            return ("⏳ inval", f"{mark} {subj}.{pred}→{obj}")
         return ("⚙ curat", f"reason={reason}")
 
     if event_type == "memory.queried":
@@ -203,6 +210,11 @@ def _feed_summary_line(events: list[StatusEvent]) -> str:
         for e in events
         if e.type == "memory.curated" and e.payload.get("reason") == "merge_candidate"
     )
+    inval_count = sum(
+        1
+        for e in events
+        if e.type == "memory.curated" and e.payload.get("reason") == "invalidation"
+    )
     total = sum(counts.values())
     bits = [f"{total} events"]
     # Order = visual scan priority: producer activity first, then
@@ -215,6 +227,7 @@ def _feed_summary_line(events: list[StatusEvent]) -> str:
         ("xlink", crosslink_count),
         ("clean", refresh_count),
         ("merge", merge_count),
+        ("inval", inval_count),
         ("query", counts.get("memory.queried", 0)),
         ("routed", counts.get("memory.routed", 0)),
     ):

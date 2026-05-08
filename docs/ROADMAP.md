@@ -219,8 +219,8 @@
 #### Curator
 - [x] **T4.1** Curator worker（`core/workers/curator.py`）：每次 wiki round 后自动运行 refresh → crosslink。`Curator` class 支持 standalone（`bus=None`）+ dry_run。已接入 IntakeProcessor 作为 Step 5（process_batch → wiki round → embedding sync → curator）。错误 log 但不阻塞 intake pipeline。7 个测试。
 - [x] **T4.2** 语义重复检测：`MemPalaceAdapter.check_duplicate()` 扩展 + `core/aleph/pipeline/dedup_pages.py`。扫描 wiki 页面对，过滤自匹配，报告跨页重复候选（`MergeCandidate`）。不自动合并——emit `memory.curated(reason="merge_candidate")`。Curator Step 3（refresh → crosslink → dedup）。12 个新测试。
-- [ ] **T4.3** 失效模式识别（"我搬家了" / "项目结束了" 类语义）
-- [ ] **T4.4** 调 KG.invalidate — 需扩展 MemPalaceAdapter 接口
+- [x] **T4.3** 失效模式识别（"我搬家了" / "项目结束了" 类语义）：intake prompt 提取 `invalidations` 字段，`_apply_invalidations` 调用 `adapter.kg_invalidate()` 标记 KG 事实过期，emit `memory.curated(reason="invalidation")`。17 个新测试。
+- [x] **T4.4** 调 KG.invalidate — `kg_invalidate()` 加入 MemPalaceAdapter Protocol + InMemory（no-op）+ Stdio 实现。与 T4.3 同步完成。
 - [ ] **T4.5** Aleph wiki 页面也能被 invalidate（frontmatter 加 `superseded_by`）
 - [x] **T4.6** emit `memory.curated`：`source=worker:curator`，`reason=crosslink` 或 `reason=refresh`，payload 含 pages_modified / links_inserted / paragraphs_removed。dry_run 或无变更时不 emit。
 
