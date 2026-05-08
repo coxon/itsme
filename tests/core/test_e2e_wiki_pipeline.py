@@ -574,6 +574,7 @@ class TestVaultDiscovery:
     ) -> None:
         """$ITSME_ALEPH_ROOT points to a wiki."""
         from itsme.core.api import _discover_aleph
+        from itsme.core.config import load_config
 
         aleph_root = tmp_path / "my-wiki"
         aleph_root.mkdir()
@@ -582,7 +583,8 @@ class TestVaultDiscovery:
         (aleph_root / "sources").mkdir()
 
         monkeypatch.setenv("ITSME_ALEPH_ROOT", str(aleph_root))
-        discovered = _discover_aleph()
+        cfg = load_config(skip_file=True)
+        discovered = _discover_aleph(cfg)
         assert discovered is not None
         assert discovered.root == aleph_root.resolve()
 
@@ -593,9 +595,11 @@ class TestVaultDiscovery:
     ) -> None:
         """No wiki at any candidate path → None."""
         from itsme.core.api import _discover_aleph
+        from itsme.core.config import load_config
 
         monkeypatch.setenv("ITSME_ALEPH_ROOT", "")
         # Override HOME so ~/Documents/Aleph/ doesn't accidentally exist
         monkeypatch.setenv("HOME", str(tmp_path))
-        discovered = _discover_aleph()
+        cfg = load_config(skip_file=True)
+        discovered = _discover_aleph(cfg)
         assert discovered is None

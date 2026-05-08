@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 _logger = logging.getLogger(__name__)
 
@@ -245,23 +245,43 @@ class StubProvider:
 # ----------------------------------------------------------- factory
 
 
-def build_llm_provider() -> LLMProvider | None:
+def build_llm_provider(
+    *,
+    cfg: Any | None = None,
+) -> LLMProvider | None:
     """Auto-detect and construct the best available LLM provider.
 
+    When *cfg* (a :class:`itsme.core.config.Config`) is provided,
+    reads ``cfg.llm_api_key`` and ``cfg.llm_model`` instead of
+    querying env vars directly.
+
     Returns:
-        A :class:`DeepSeekProvider` if ``$DEEPSEEK_API_KEY`` is set;
+        A :class:`DeepSeekProvider` if an API key is available;
         ``None`` otherwise. The caller decides whether to degrade or
         raise.
     """
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if cfg is not None:
+        api_key = cfg.llm_api_key
+        model = cfg.llm_model
+        base_url = cfg.llm_base_url
+        max_tokens = cfg.llm_max_tokens
+    else:
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        model = os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
+        base_url = os.environ.get("ITSME_LLM_BASE_URL", DEFAULT_BASE_URL)
+        max_tokens = DEFAULT_MAX_TOKENS
+
     if not api_key:
         _logger.info("itsme: no DEEPSEEK_API_KEY — LLM provider unavailable, will degrade")
         return None
 
-    model = os.environ.get("ITSME_LLM_MODEL", DEFAULT_MODEL)
-
     try:
-        return DeepSeekProvider(model=model, api_key=api_key)
+        return DeepSeekProvider(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            max_tokens=max_tokens,
+        )
     except LLMError as exc:
         _logger.warning("itsme: LLM provider creation failed, degrading: %s", exc)
         return None

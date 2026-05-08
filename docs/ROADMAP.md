@@ -233,7 +233,7 @@
 - [x] **T4.10** `status(format=feed)` emoji 渲染：📥 raw / 🔀 route / 💾 store / ♻ dedup / 🔗 xlink / 🧹 clean / 🔍 query / 📝 wiki / ⚙ curat。summary line 新增 wiki/xlink/clean 桶。query 现在显示 mode。
 - [ ] **T4.11** Observability：events viewer（CLI `itsme events tail`）
 - [ ] **T4.12** 失败可观察：worker 异常进 events，不静默
-- [ ] **T4.13** 配置热加载（默认阈值、wiki 路径）
+- [x] **T4.13** 集中配置（`core/config.py`）：`Config` frozen dataclass + `load_config()` 三层合并（env → `~/.itsme/config.toml` → 内置默认值）。所有 `ITSME_*` 环境变量 + 硬编码阈值收敛到一处。`build_default_memory` / `_select_mempalace_backend` / `_discover_aleph` / `build_llm_provider` 全部改用 Config。含示例文件 `docs/config.example.toml`。22 个新测试。
 - [ ] **T4.14** `## 用户笔记` 区块契约（wiki 中用户保留区域）
 
 ---

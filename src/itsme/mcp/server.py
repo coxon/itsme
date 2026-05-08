@@ -14,11 +14,10 @@ Design:
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
-from itsme.core import Memory, build_default_memory, default_db_path
+from itsme.core import Memory, build_default_memory
+from itsme.core.config import load_config
 from itsme.core.workers import WorkerScheduler
 from itsme.mcp.tools.ask import ask_handler
 from itsme.mcp.tools.remember import remember_handler
@@ -80,39 +79,25 @@ def build_server(memory: Memory) -> FastMCP[Any]:
     return server
 
 
-def _resolve_db_path() -> Path:
-    """Honor ``$ITSME_DB_PATH`` if set, else fall back to the shared default."""
-    raw = os.environ.get("ITSME_DB_PATH")
-    if raw:
-        return Path(raw).expanduser()
-    return default_db_path()
-
-
-def _resolve_project() -> str:
-    """Honor ``$ITSME_PROJECT`` if set, else 'default'."""
-    return os.environ.get("ITSME_PROJECT", "default")
-
-
 def main() -> None:
     """Run the itsme MCP server over stdio.
 
     Boot sequence:
 
-    1. Build a :class:`Memory` instance pointed at the events ring.
-    2. Spin up a :class:`WorkerScheduler` running the router consume
+    1. Load centralised :class:`Config` (env → file → defaults).
+    2. Build a :class:`Memory` instance pointed at the events ring.
+    3. Spin up a :class:`WorkerScheduler` running the router consume
        loop in a background thread (handles hook-emitted
        ``raw.captured`` events while ``Memory.remember`` keeps its
        sync fast-path).
-    3. Register the 3 verbs on a :class:`FastMCP` server.
-    4. Run stdio until the host disconnects.
+    4. Register the 3 verbs on a :class:`FastMCP` server.
+    5. Run stdio until the host disconnects.
 
     The function returns normally on clean shutdown so packaging /
     plugin smoke tests can drive it without raising.
     """
-    memory = build_default_memory(
-        project=_resolve_project(),
-        db_path=_resolve_db_path(),
-    )
+    cfg = load_config()
+    memory = build_default_memory(cfg=cfg)
     scheduler = WorkerScheduler()
     try:
         # Register the router consume_loop as a background worker so
