@@ -64,6 +64,7 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from itsme.core.adapters.mempalace import (
+    DuplicateMatch,
     MemPalaceHit,
     MemPalaceWriteResult,
 )
@@ -366,6 +367,48 @@ class StdioMemPalaceAdapter:
     def close(self) -> None:
         """Shut down the MemPalace subprocess. Idempotent."""
         self._terminate_quietly()
+
+    def check_duplicate(
+        self,
+        content: str,
+        *,
+        threshold: float = 0.85,
+    ) -> list[DuplicateMatch]:
+        """Check if *content* semantically duplicates existing drawers.
+
+        Calls ``mempalace_check_duplicate`` — returns matches sorted
+        by similarity descending. Empty list = no duplicates.
+        """
+        if not content.strip():
+            return []
+        result = self._call_tool(
+            "mempalace_check_duplicate",
+            {"content": content, "threshold": threshold},
+        )
+        # Empty palace → no duplicates
+        error = result.get("error")
+        if error is not None:
+            if isinstance(error, str) and error.startswith("No palace found"):
+                return []
+            raise MemPalaceConnectError(f"mempalace_check_duplicate failed: {error!r}")
+
+        matches: list[DuplicateMatch] = []
+        for raw in result.get("matches", []):
+            sim = raw.get("similarity")
+            if sim is None:
+                continue
+            sim_f = max(0.0, min(1.0, float(sim)))
+            if sim_f < threshold:
+                continue
+            matches.append(
+                DuplicateMatch(
+                    drawer_id=str(raw.get("id", "unknown")),
+                    similarity=sim_f,
+                    content=str(raw.get("content", "")),
+                )
+            )
+        matches.sort(key=lambda m: m.similarity, reverse=True)
+        return matches
 
     # ----------------------------------------------------------- internals
 

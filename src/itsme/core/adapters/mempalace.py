@@ -44,6 +44,16 @@ class MemPalaceHit(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
 
 
+class DuplicateMatch(BaseModel):
+    """A single match from :meth:`MemPalaceAdapter.check_duplicate`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    drawer_id: str = Field(min_length=1)
+    similarity: float = Field(ge=0.0, le=1.0)
+    content: str
+
+
 @runtime_checkable
 class MemPalaceAdapter(Protocol):
     """The shape every MemPalace backend must satisfy.
@@ -77,6 +87,19 @@ class MemPalaceAdapter(Protocol):
 
     def close(self) -> None:
         """Release any underlying resources (sockets, subprocesses, ...)."""
+        ...
+
+    def check_duplicate(
+        self,
+        content: str,
+        *,
+        threshold: float = 0.85,
+    ) -> list[DuplicateMatch]:
+        """Check if *content* semantically duplicates existing drawers.
+
+        Returns matches with ``similarity >= threshold``, sorted by
+        similarity descending. Empty list = no duplicates found.
+        """
         ...
 
 
@@ -230,3 +253,35 @@ class InMemoryMemPalaceAdapter:
 
     def close(self) -> None:  # noqa: D401 — Protocol shape
         """No-op for the in-memory backend."""
+
+    def check_duplicate(
+        self,
+        content: str,
+        *,
+        threshold: float = 0.85,
+    ) -> list[DuplicateMatch]:
+        """Check for semantic duplicates using Jaccard token overlap."""
+        q_tokens = _tokens(content)
+        if not q_tokens:
+            return []
+        with self._lock:
+            candidates = list(self._drawers)
+        matches: list[DuplicateMatch] = []
+        for drawer in candidates:
+            if not drawer.tokens:
+                continue
+            inter = len(q_tokens & drawer.tokens)
+            if inter == 0:
+                continue
+            union = len(q_tokens | drawer.tokens)
+            sim = inter / union
+            if sim >= threshold:
+                matches.append(
+                    DuplicateMatch(
+                        drawer_id=drawer.drawer_id,
+                        similarity=sim,
+                        content=drawer.content,
+                    )
+                )
+        matches.sort(key=lambda m: m.similarity, reverse=True)
+        return matches

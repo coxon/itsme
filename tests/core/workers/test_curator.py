@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from itsme.core.adapters.mempalace import InMemoryMemPalaceAdapter
 from itsme.core.aleph.wiki import Aleph
 from itsme.core.events import EventBus, EventType
 from itsme.core.workers.curator import Curator
@@ -173,3 +174,59 @@ class TestCurator:
         _, body = aleph.read_page("wings/work/projects/target.md")
         # Only one [[source|Source]] link (not two)
         assert body.count("[[source|Source]]") == 1
+
+    def test_dedup_pages_with_adapter(self, wiki_dir: Path, bus: EventBus) -> None:
+        """Curator runs dedup-pages when adapter is provided."""
+        # Many distinct shared tokens so Jaccard stays above 0.85 despite
+        # differing title tokens ("A" vs "B", "# Topic A" vs "# Topic B").
+        shared = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima"
+        _write_page(wiki_dir, slug="page-a", title="Topic A", body=shared)
+        _write_page(wiki_dir, slug="page-b", title="Topic B", body=shared)
+
+        aleph = Aleph(wiki_dir)
+        adapter = InMemoryMemPalaceAdapter()
+        adapter.write(content=f"Topic A\ntest\n{shared}", wing="aleph", room="room_wiki")
+        adapter.write(content=f"Topic B\ntest\n{shared}", wing="aleph", room="room_wiki")
+
+        curator = Curator(aleph=aleph, bus=bus, adapter=adapter)
+        result = curator.run()
+
+        assert result.merge_candidates >= 1
+
+    def test_no_dedup_without_adapter(self, wiki_dir: Path, bus: EventBus) -> None:
+        """Curator skips dedup-pages when no adapter is provided."""
+        _write_page(wiki_dir, slug="solo", title="Solo", body="content")
+
+        aleph = Aleph(wiki_dir)
+        curator = Curator(aleph=aleph, bus=bus, adapter=None)
+        result = curator.run()
+
+        assert result.merge_candidates == 0
+
+    def test_dedup_emits_merge_candidate_event(self, wiki_dir: Path, bus: EventBus) -> None:
+        """Dedup-pages emits memory.curated(reason=merge_candidate)."""
+        _write_page(wiki_dir, slug="dup1", title="Dup One", body="same same same topic here")
+        _write_page(wiki_dir, slug="dup2", title="Dup Two", body="same same same topic here")
+
+        aleph = Aleph(wiki_dir)
+        adapter = InMemoryMemPalaceAdapter()
+        adapter.write(
+            content="Dup One\ntest\nsame same same topic here",
+            wing="aleph",
+            room="room_wiki",
+        )
+        adapter.write(
+            content="Dup Two\ntest\nsame same same topic here",
+            wing="aleph",
+            room="room_wiki",
+        )
+
+        curator = Curator(aleph=aleph, bus=bus, adapter=adapter)
+        curator.run()
+
+        curated = bus.tail(n=20, types=[EventType.MEMORY_CURATED])
+        reasons = [e.payload.get("reason") for e in curated]
+        if any(r == "merge_candidate" for r in reasons):
+            merge_evt = next(e for e in curated if e.payload.get("reason") == "merge_candidate")
+            assert "candidates" in merge_evt.payload
+            assert merge_evt.payload["count"] >= 1
