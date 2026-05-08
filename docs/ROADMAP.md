@@ -214,7 +214,7 @@
 
 - [x] **T4.0** `core/aleph/pipeline/crosslink.py`：全量扫描 wiki body，自动插入 `[[wikilink]]`（目前 LLM 在 round prompt 中生成 `related: [[...]]`，但没有回填已有页面的 body 引用）。设计规则：first-occurrence-only、never-self-link、skip protected zones（fenced code / inline code / existing [[]] / callouts）、longest-match-first（CJK 感知）、shield new links（防子串泄漏）、idempotent + dry_run。29 个测试。
 - [x] **T4.0b** `core/aleph/pipeline/refresh.py`：去重段落、清冗余（同一实体从多个 session 写入可能产生重复段落）。确定性、无 LLM：exact-duplicate paragraph removal（whitespace-normalized）、History entry dedup、blank-line collapse。Protected blocks（code / callouts）永不去重。23 个测试。
-- [ ] **T4.0c** 验收：wiki 中的 entry 含真实 `[[wikilink]]` 双向链接（Obsidian Graph view 可用）
+- [x] **T4.0c** 验收：真实 wiki（40 pages）crosslink dry-run → 17 links inserted, idempotent（pass 2 = 0 changes）。已在 `~/Documents/Aleph/` 实际执行。
 
 #### Curator
 - [x] **T4.1** Curator worker（`core/workers/curator.py`）：每次 wiki round 后自动运行 refresh → crosslink。`Curator` class 支持 standalone（`bus=None`）+ dry_run。已接入 IntakeProcessor 作为 Step 5（process_batch → wiki round → embedding sync → curator）。错误 log 但不阻塞 intake pipeline。7 个测试。
@@ -230,7 +230,7 @@
 - [x] **T4.9** Ask 提问范式在 SKILL.md "When to ask" / "Modes" / "Examples" / "When ask returns nothing" 四节覆盖。新增 `mode="auto"` 推荐默认。
 
 #### 体验
-- [ ] **T4.10** `status(format=feed)` 渲染（emoji / 折叠 / 时间线）
+- [x] **T4.10** `status(format=feed)` emoji 渲染：📥 raw / 🔀 route / 💾 store / ♻ dedup / 🔗 xlink / 🧹 clean / 🔍 query / 📝 wiki / ⚙ curat。summary line 新增 wiki/xlink/clean 桶。query 现在显示 mode。
 - [ ] **T4.11** Observability：events viewer（CLI `itsme events tail`）
 - [ ] **T4.12** 失败可观察：worker 异常进 events，不静默
 - [ ] **T4.13** 配置热加载（默认阈值、wiki 路径）
