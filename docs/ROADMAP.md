@@ -225,9 +225,9 @@
 - [x] **T4.6** emit `memory.curated`：`source=worker:curator`，`reason=crosslink` 或 `reason=refresh`，payload 含 pages_modified / links_inserted / paragraphs_removed。dry_run 或无变更时不 emit。
 
 #### Skill 文档
-- [ ] **T4.7** `skills/itsme.md` 主 skill 文档（角色、能力、边界）
-- [ ] **T4.8** `skills/triggers.md`：哪些场景必 remember、哪些别记
-- [ ] **T4.9** `skills/usage.md`：ask 的提问范式
+- [x] **T4.7** `skills/itsme/SKILL.md` 主 skill 文档升级 v0.0.4：mode 表格（auto/wiki/verbatim）、双引擎架构说明、hooks 背后流程、curator 维护、failure modes 更新。去掉 v0.0.1 NotImplementedError 引用。
+- [x] **T4.8** Trigger guide 在 SKILL.md "When to remember" / "What NOT to remember" / "Anti-patterns" 三节覆盖完整，不独立拆文件。
+- [x] **T4.9** Ask 提问范式在 SKILL.md "When to ask" / "Modes" / "Examples" / "When ask returns nothing" 四节覆盖。新增 `mode="auto"` 推荐默认。
 
 #### 体验
 - [ ] **T4.10** `status(format=feed)` 渲染（emoji / 折叠 / 时间线）
