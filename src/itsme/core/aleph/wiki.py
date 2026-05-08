@@ -184,7 +184,7 @@ class Aleph:
             return None, ""
         text = full.read_text(encoding="utf-8")
         meta = self._parse_frontmatter(full)
-        body = self._extract_body(text)
+        body = self.extract_body(text)
         return meta, body
 
     def find_page(self, slug: str) -> PageMeta | None:
@@ -262,7 +262,7 @@ class Aleph:
                 continue
 
             text = md_file.read_text(encoding="utf-8")
-            body = self._extract_body(text).lower()
+            body = self.extract_body(text).lower()
             score = 0.0
             snippet = ""
 
@@ -507,7 +507,7 @@ class Aleph:
         return fm, parts[2].lstrip("\n")
 
     @staticmethod
-    def _extract_body(text: str) -> str:
+    def extract_body(text: str) -> str:
         """Strip frontmatter, return body only."""
         if not text.startswith("---"):
             return text

@@ -11,6 +11,10 @@ Modules:
   wiki. Handles page I/O, frontmatter parsing, search, index/log.
 - ``round.py`` — LLM-powered wiki consolidation (decides create vs
   update, generates frontmatter + body).
+- ``pipeline/crosslink.py`` — Auto-insert ``[[wikilink]]`` backlinks
+  across wiki pages (T4.0).
+- ``pipeline/refresh.py`` — Dedup paragraphs, clean History entries,
+  collapse blank lines (T4.0b).
 
 Search (``ask(mode=auto)``):
   wiki pages > MemPalace raw

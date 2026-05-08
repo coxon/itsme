@@ -125,31 +125,45 @@ def _render_payload(  # noqa: C901 — type-dispatch tree is simpler flat
     if event_type == "raw.captured":
         producer = _short_producer(source, payload)
         snippet = _content_snippet(payload.get("content"))
-        return ("raw    ", f"<{producer}> {snippet}")
+        return ("📥 raw  ", f"<{producer}> {snippet}")
 
     if event_type == "memory.routed":
         wing = payload.get("wing", "?")
         room = payload.get("room", "?")
         rule = payload.get("rule", "?")
-        return ("routed ", f"→ {wing}/{room}  ({rule})")
+        return ("🔀 route", f"→ {wing}/{room}  ({rule})")
 
     if event_type == "memory.stored":
         drawer = _short_id(payload.get("drawer_id"))
         room = payload.get("room", "?")
-        return ("stored ", f"✓ {room} drawer:{drawer}")
+        return ("💾 store", f"✓ {room} drawer:{drawer}")
 
     if event_type == "memory.curated":
         reason = payload.get("reason", "?")
         if reason == "dedup":
             drawer = _short_id(payload.get("drawer_id"))
             producer = payload.get("producer_kind") or "?"
-            return ("dedup  ", f"= <{producer}> → drawer:{drawer}")
-        return ("curated", f"reason={reason}")
+            return ("♻ dedup ", f"= <{producer}> → drawer:{drawer}")
+        if reason == "crosslink":
+            n = payload.get("links_inserted", 0)
+            p = payload.get("pages_modified", 0)
+            return ("🔗 xlink", f"+{n} links across {p} pages")
+        if reason == "refresh":
+            para = payload.get("paragraphs_removed", 0)
+            hist = payload.get("history_dupes_removed", 0)
+            return ("🧹 clean", f"-{para} para, -{hist} hist dupes")
+        return ("⚙ curat", f"reason={reason}")
 
     if event_type == "memory.queried":
         question = _content_snippet(payload.get("question"))
         n = payload.get("hit_count", "?")
-        return ("query  ", f"? '{question}' → {n} hits")
+        mode = payload.get("mode", "?")
+        return ("🔍 query", f"? '{question}' → {n} hits ({mode})")
+
+    if event_type == "wiki.promoted":
+        created = payload.get("pages_created", 0)
+        updated = payload.get("pages_updated", 0)
+        return ("📝 wiki ", f"+{created} new, ~{updated} updated")
 
     # Unknown / future event type — keep it observable with the source
     # tag rather than dropping silently.
@@ -175,18 +189,23 @@ def _feed_summary_line(events: list[StatusEvent]) -> str:
     dedup_count = sum(
         1 for e in events if e.type == "memory.curated" and e.payload.get("reason") == "dedup"
     )
-    curated_other_count = sum(
-        1 for e in events if e.type == "memory.curated" and e.payload.get("reason") != "dedup"
+    crosslink_count = sum(
+        1 for e in events if e.type == "memory.curated" and e.payload.get("reason") == "crosslink"
+    )
+    refresh_count = sum(
+        1 for e in events if e.type == "memory.curated" and e.payload.get("reason") == "refresh"
     )
     total = sum(counts.values())
     bits = [f"{total} events"]
     # Order = visual scan priority: producer activity first, then
-    # writes, then dedup-vs-other curated, then queries, then routing.
+    # writes, then wiki, then curated subtypes, then queries.
     for label, n in (
         ("raw", counts.get("raw.captured", 0)),
         ("stored", counts.get("memory.stored", 0)),
+        ("wiki", counts.get("wiki.promoted", 0)),
         ("dedup", dedup_count),
-        ("curated", curated_other_count),
+        ("xlink", crosslink_count),
+        ("clean", refresh_count),
         ("query", counts.get("memory.queried", 0)),
         ("routed", counts.get("memory.routed", 0)),
     ):

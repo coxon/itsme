@@ -5,7 +5,7 @@ description: |
   WebSearch / external lookups whenever the query mentions a person,
   company, project, library, or topic the user might have notes on —
   even when phrased as a fresh-fact lookup ("最新", "latest", "财报",
-  "earnings"). The user's stored drawer is often more
+  "earnings"). The user's stored knowledge is often more
   authoritative than fresh web results for anything they actively
   track. Activation triggers: past references ("remember", "what did
   we", "I told you", "I've been working on", "我之前", "你还记得"),
@@ -13,7 +13,7 @@ description: |
   "I prefer Z"), or any second-person framing ("you/we/I"). Use
   `remember` when a decision, preference, or non-obvious fact lands.
   Use `status` rarely — it's for debugging.
-version: 0.0.1
+version: 0.0.4
 ---
 
 # itsme — memory for your agent
@@ -36,7 +36,7 @@ deliberate writes**.
 > **Before WebSearch, before external lookups, before answering from
 > training data — if the query touches anything the user might have
 > private notes on, call `ask` first.** It's one cheap MCP call. The
-> stored drawer is the canonical answer; the web is the fallback.
+> stored knowledge is the canonical answer; the web is the fallback.
 
 ---
 
@@ -91,30 +91,20 @@ reasonable in isolation but produces a worse answer than `ask`-first.
 **Why:** "最新 / latest" does **not** override memory priority. The
 user's stored notes about Palantir are often *more* recent and *more*
 relevant than what's on the web — they've been curating this
-specifically. Even if the web has a fresher number, the user's drawer
-contains their *interpretation* of the trend, which is what they
-actually want to hear back.
+specifically.
 
 ### ❌ Named entity → answer from training data
 
 > User: "PostgreSQL 16 有什么新特性？"
 > Bad: → answer from training-data knowledge of PG16.
-> Good: → `ask("Postgres 16")` first. The user may have a drawer
-> noting which features they've adopted, which they hit bugs in, etc.
-> *Then* supplement with general knowledge.
-
-**Why:** A correct generic answer is still the wrong answer when the
-user's own notes contradict it or contextualize it differently.
+> Good: → `ask("Postgres 16")` first. The user may have notes
+> on which features they've adopted, which they hit bugs in, etc.
 
 ### ❌ "你帮我看看 X" / "tell me about X" → external search
 
 > User: "你帮我看看 Aleph 这个项目"
 > Bad: → web search for "Aleph project".
 > Good: → `ask("Aleph")` first; this is the user's own project.
-
-**Why:** Second-person phrasing (你/we/I) is a strong signal of
-"check what we already have together". Don't go external until memory
-returns empty.
 
 ### ❌ Empty `ask` → ask same question 3 different ways
 
@@ -129,7 +119,7 @@ tool (WebSearch, file search) or ask the user directly.
 Call it whenever any of these happen in the conversation:
 
 1. **A decision lands.** "We're going with Postgres because X." →
-   `remember("Picked Postgres over SQLite: need concurrent writes, worker pool hits >8", kind="decision")`
+   `remember("Picked Postgres over SQLite: need concurrent writes", kind="decision")`
 2. **A non-obvious fact surfaces.** "Actually the API returns 204 not
    200 on empty queues." → `remember(..., kind="fact")`
 3. **The user expresses a preference or feeling you'd want to honor
@@ -175,26 +165,23 @@ benefit from knowing "what did we decide about X?" before acting.
 
 ### Modes
 
-- **`verbatim`** (default in v0.0.1) — search raw MemPalace memories by
-  keyword. This is the only mode wired up right now.
-- **`auto`** *(v0.0.2)* — try the curated wiki first, fall back to raw
-  memory. Raises `NotImplementedError` in v0.0.1.
-- **`wiki`** *(v0.0.2)* — only the curated wiki. Raises
-  `NotImplementedError` in v0.0.1.
-- **`now`** *(v0.0.3)* — aggregate recent activity ("what was I just
-  working on?"). Raises `NotImplementedError` in v0.0.1.
+| Mode | What it searches | When to use |
+|------|-----------------|-------------|
+| **`auto`** (recommended) | Wiki pages + wiki embedding + MemPalace raw — three legs merged and deduped | Default for most queries. Consolidated wiki knowledge first, raw memories as fallback. |
+| **`wiki`** | Aleph wiki pages only (keyword match on title/alias/summary/body) | When you want curated knowledge without raw noise. |
+| **`verbatim`** | MemPalace raw memories only (embedding search) | When you want the user's exact words, or wiki doesn't cover the topic yet. |
 
-In v0.0.1, `ask()` performs a direct verbatim query against MemPalace
-and returns matching drawer snippets. Passing any other mode errors
-out immediately — don't catch and retry with a different mode; the
-answer is "not implemented yet", not "wrong query".
+**Use `mode="auto"` unless you have a specific reason not to.** It
+gives you the best of both worlds: high-precision wiki hits plus
+high-recall raw memory as a safety net.
 
 ### Examples
 
 ```python
-ask("What did we decide about database choice?")               # verbatim (default)
-ask("What did the user say about commit style?", mode="verbatim")
-# ask("What have I been working on?", mode="now")  # ← v0.0.3 only
+ask("What did we decide about database choice?")                    # auto (default)
+ask("星图计划的负责人是谁？", mode="auto")                             # auto — wiki will hit
+ask("What exactly did the user say about commit style?", mode="verbatim")  # raw words
+ask("海龙", mode="wiki")                                              # wiki page lookup
 ```
 
 ### When `ask` returns nothing
@@ -218,7 +205,9 @@ Formats: `json` for further processing, `feed` for showing the user.
 
 ---
 
-## Hooks work silently behind you
+## How memory works behind the scenes
+
+### Hooks — silent salvage
 
 Even if you never call `remember`, itsme snapshots the transcript on:
 
@@ -226,25 +215,40 @@ Even if you never call `remember`, itsme snapshots the transcript on:
 - Pre-compact (CC `PreCompact`)
 - Context pressure crossing ~70% (proactive salvage)
 
-Those snapshots end up in MemPalace as `raw.captured`. You don't need
-to duplicate the safety net — but explicit `remember` calls are still
-higher-quality signal because you chose them deliberately.
+Those snapshots go through an LLM intake pipeline that:
+1. Filters out boilerplate (tool output, CC envelopes)
+2. Splits into per-turn segments
+3. Classifies each turn as keep or skip
+4. Writes ALL turns to MemPalace (raw, for full recall)
+5. Consolidates KEEP turns into wiki pages (Obsidian Aleph vault)
+6. Runs wiki maintenance (dedup paragraphs, insert crosslinks)
+
+Explicit `remember` calls bypass all of this — they're faster and
+higher-quality because you chose them deliberately.
+
+### Two-engine architecture
+
+```text
+MemPalace (raw)              Aleph (wiki)
+─────────────                ──────────────
+verbatim · high recall       curated · high precision
+"what was said"              "what was learned"
+```
+
+`ask(mode="auto")` queries both and merges results.
 
 ---
 
 ## Failure modes to expect
 
 - **MCP server not reachable** — tool call errors out. Report once,
-  don't retry-loop; the user likely knows their plugin is mis-installed.
-- **Empty `ask` result** — see above.
-- **`remember` succeeded but `status` / `ask` doesn't show it** — in
-  v0.0.1 `remember()` runs `route_and_store` synchronously and emits
-  `memory.stored` *before* returning, so the entry should be
-  immediately visible. If it's not, the cause is on your side: check
-  your `scope` / `limit` / `mode` filters before assuming a backend
-  bug. (v0.0.2+ may introduce async promotion to a wiki layer; that
-  delay will only affect `mode="wiki"` / `mode="auto"`, not the
-  raw-memory query.)
+  don't retry-loop.
+- **Empty `ask` result** — see above. Move on.
+- **`remember` succeeded but `ask` doesn't show it** — `remember`
+  writes to MemPalace synchronously (immediately visible via
+  `mode="verbatim"`). Wiki consolidation is async (hooks only),
+  so explicit `remember` content won't appear in `mode="wiki"`
+  until the next hook capture triggers a wiki round.
 
 ---
 
@@ -252,7 +256,8 @@ higher-quality signal because you chose them deliberately.
 
 **`ask` before WebSearch. `ask` before training-data answers.
 `ask` even when the query says "最新 / latest".** The user's
-drawer beats the web for anything they track.
+knowledge beats the web for anything they track.
 
 Write deliberately via `remember`. Recall before acting via `ask`.
 Trust the hooks' safety net but don't rely on it.
+Use `mode="auto"` for the best search coverage.

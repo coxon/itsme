@@ -1,6 +1,6 @@
 # itsme — Architecture
 
-> Status: **v0.0.3** · production-ready for Claude Code
+> Status: **v0.0.4** · production-ready for Claude Code
 > Repo: <https://github.com/coxon/itsme>
 > Language: **Python 3.12+**
 > Last updated: 2026-05-07
@@ -190,12 +190,13 @@ verbatim · 全量 · 短链            结构化 · 提炼 · 长链
 
 ---
 
-## 6. Workers — 2 个独立 worker
+## 6. Workers — 3 个独立 worker
 
 | worker | 触发 | 输入事件 | 输出 | 核心职责 |
 |---|---|---|---|---|
 | **router** | `remember()` 同步调用 | `raw.captured` (explicit) | `memory.stored` + `memory.routed` | 规则路由 → MemPalace raw 写入 |
 | **intake** | async consume loop | `raw.captured` (hook) | `memory.stored` + `memory.routed` + `wiki.promoted` | LLM 提取 → MemPalace raw + AlephRound wiki |
+| **curator** | intake post-round | (none — triggered internally) | `memory.curated` | wiki 维护：refresh dedup → crosslink backlinks |
 
 ### 6.1 router — 同步快路径
 
@@ -215,6 +216,17 @@ verbatim · 全量 · 短链            结构化 · 提炼 · 长链
 3. **全量写入**：所有 turns → MemPalace raw（不管 keep/skip）
 4. **Wiki consolidation**：keep turns → AlephRound → create/update wiki pages
 5. **Embedding sync**：新建/更新的 wiki pages → MemPalace `aleph` wing（embedding 搜索面）
+6. **Curator**：post-round wiki 维护 → refresh dedup + crosslink backlinks → emit `memory.curated`
+
+### 6.3 curator — wiki 维护
+
+每次 wiki round 后自动运行：
+
+1. **Refresh**：去重段落（whitespace-normalized 精确匹配）+ History 条目去重 + 空行折叠
+2. **Crosslink**：全量扫描 wiki body，为提到其他页面标题/别名的纯文本插入 `[[wikilink]]`
+3. 有变更时 emit `memory.curated(reason=crosslink/refresh)`
+
+也可独立调用（`Curator(aleph=..., bus=None).run()`）用于 CLI / 手动维护。
 
 **LLM 降级**：无 API key 或网络错误时，turns 仍写入 MemPalace raw（v0.0.1 行为），只是跳过 wiki 合并。
 
@@ -265,6 +277,9 @@ Aleph 不是外部服务，而是 itsme 进程内的一个**模块**（`core/ale
 core/aleph/
 ├── wiki.py           # Wiki 读写 + keyword 搜索（Aleph class）
 ├── round.py          # AlephRound — LLM 驱动的 create/update 决策
+├── pipeline/
+│   ├── crosslink.py  # Auto-insert [[wikilink]] backlinks (T4.0)
+│   └── refresh.py    # Dedup paragraphs + history entries (T4.0b)
 └── prompts/
     ├── intake.md     # per-turn extraction prompt
     └── round.md      # wiki page create/update prompt
@@ -493,6 +508,7 @@ itsme/                                  # git repo root
 │       │   ├── workers/
 │       │   │   ├── router.py           # sync fast-path (explicit remember)
 │       │   │   ├── intake.py           # async intake (hooks → LLM → wiki)
+│       │   │   ├── curator.py          # wiki maintenance (crosslink + refresh)
 │       │   │   └── scheduler.py        # WorkerScheduler (async tasks)
 │       │   ├── adapters/
 │       │   │   ├── mempalace.py        # MemPalaceAdapter ABC + InMemory impl
@@ -501,6 +517,9 @@ itsme/                                  # git repo root
 │       │   ├── aleph/
 │       │   │   ├── wiki.py             # Aleph class: read/write/search pages
 │       │   │   ├── round.py            # AlephRound: LLM wiki consolidation
+│       │   │   ├── pipeline/
+│       │   │   │   ├── crosslink.py    # Auto-insert [[wikilink]] backlinks
+│       │   │   │   └── refresh.py      # Dedup paragraphs + history entries
 │       │   │   └── prompts/
 │       │   │       ├── intake.md       # per-turn extraction prompt
 │       │   │       └── round.md        # wiki page create/update prompt

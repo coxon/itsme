@@ -124,10 +124,10 @@ def test_status_handler_feed_format(memory: Memory) -> None:
     assert "summary" in out and isinstance(out["summary"], str)
     # One remember produces raw + routed + stored — all should appear.
     assert "raw" in out["feed"]
-    assert "routed" in out["feed"]
-    assert "stored" in out["feed"]
+    assert "route" in out["feed"]
+    assert "store" in out["feed"]
     # Summary line tallies what fired.
-    assert "raw" in out["summary"] and "stored" in out["summary"]
+    assert "raw" in out["summary"] and "store" in out["summary"]
 
 
 def test_status_handler_rejects_unknown_scope(memory: Memory) -> None:

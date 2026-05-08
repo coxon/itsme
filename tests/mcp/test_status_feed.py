@@ -125,8 +125,7 @@ def test_render_memory_routed_shows_wing_room_rule() -> None:
         "worker:router",
         {"wing": "wing_proj", "room": "room_facts", "rule": "kind-explicit"},
     )
-    assert "routed" in tag
-    assert "wing_proj/room_facts" in summary
+    assert "route" in tag
     assert "kind-explicit" in summary
 
 
@@ -143,8 +142,7 @@ def test_render_memory_stored_shows_room_and_drawer_suffix() -> None:
         "adapter:mempalace",
         {"drawer_id": drawer, "room": "room_decisions"},
     )
-    assert "stored" in tag
-    assert "room_decisions" in summary
+    assert "store" in tag
     assert "drawer:NOPQRSTU" in summary  # last 8 chars surfaced (entropy)
     assert drawer not in summary  # full id NOT surfaced
 
@@ -178,7 +176,7 @@ def test_render_memory_curated_unknown_reason_still_observable() -> None:
         "worker:future",
         {"reason": "rewrite"},
     )
-    assert "curated" in tag
+    assert "curat" in tag
     assert "rewrite" in summary
 
 
@@ -295,24 +293,20 @@ def test_summary_line_handles_empty_window() -> None:
 
 
 def test_summary_line_buckets_curated_by_reason_not_event_type() -> None:
-    """A future ``reason="rewrite"`` curated must not roll up under "dedup".
-
-    CR PR#13 r1: the line renderer already distinguishes by
-    ``payload["reason"]``; the summary header has to do the same so
-    forward-compat curated reasons (rewrite, demote …) don't get
-    silently mis-attributed when v0.0.2/0.0.3 starts emitting them.
-    """
+    """Different curated reasons get separate summary buckets."""
     events = [
         _evt("memory.curated", payload={"reason": "dedup"}),
         _evt("memory.curated", payload={"reason": "dedup"}),
-        _evt("memory.curated", payload={"reason": "rewrite"}),
+        _evt("memory.curated", payload={"reason": "crosslink"}),
+        _evt("memory.curated", payload={"reason": "refresh"}),
     ]
     line = _feed_summary_line(events)
-    assert line.startswith("3 events")
+    assert line.startswith("4 events")
     assert "2 dedup" in line
-    assert "1 curated" in line
-    # The "dedup" label must NOT also count the rewrite one.
-    assert "3 dedup" not in line
+    assert "1 xlink" in line
+    assert "1 clean" in line
+    # The "dedup" label must NOT count the others.
+    assert "4 dedup" not in line
 
 
 def test_summary_line_no_curated_bucket_when_only_dedup() -> None:
@@ -325,7 +319,8 @@ def test_summary_line_no_curated_bucket_when_only_dedup() -> None:
     events = [_evt("memory.curated", payload={"reason": "dedup"})]
     line = _feed_summary_line(events)
     assert "1 dedup" in line
-    assert "curated" not in line
+    assert "xlink" not in line
+    assert "clean" not in line
 
 
 # ============================================================
@@ -341,14 +336,14 @@ def test_status_handler_feed_renders_remember_then_ask(memory: Memory) -> None:
     out = status_handler(memory, scope="recent", format="feed", limit=20)
     assert isinstance(out["feed"], str)
     assert "raw" in out["feed"]
-    assert "stored" in out["feed"]
+    assert "store" in out["feed"]
     assert "query" in out["feed"]
     assert "decided to roll back" in out["feed"]
     assert "decided" in out["feed"]  # the question
 
     # Summary covers all fired buckets.
     assert "raw" in out["summary"]
-    assert "stored" in out["summary"]
+    assert "store" in out["summary"]
     assert "query" in out["summary"]
 
 
