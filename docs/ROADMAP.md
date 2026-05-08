@@ -3,7 +3,7 @@
 > Status: **Design draft** · v0.0.x
 > Repo: <https://github.com/coxon/itsme>
 > Language: **Python**
-> Last updated: 2026-05-07
+> Last updated: 2026-05-08
 
 策略：**端到端最薄一刀** 先打通，再逐步加厚。
 
@@ -40,7 +40,7 @@
 | **v0.0.1** | 端到端骨架 | hook → events → router → MemPalace → ask 直查 MP，能装进 CC | ✅ |
 | **v0.0.2** | Intake + Aleph Wiki | LLM intake → MemPalace raw + AlephRound → Obsidian wiki 页面 → `ask(mode=auto)` 双引擎搜索 + `ask(mode=wiki)` | ✅ |
 | **v0.0.3** | Search 打磨 + Embedding | CJK search 修复、wiki embedding via MemPalace、score 修复、mempalace 可选依赖 | ✅ |
-| **v0.0.4** | Crosslink + Curator + 体验 | wiki crosslink 回填、refresh 去重、curator、skill 文档、status feed 渲染 | ~2 周 |
+| **v0.0.4** | Crosslink + Curator + 体验 | wiki crosslink 回填、refresh 去重、curator、skill 文档、status feed 渲染 | ✅ |
 | **v0.0.5+** | 长尾 | 跨 session 主题聚类、主动召回、KG 推理 | — |
 
 > **🎨 Icon track（平行路线）**：图标资产按 phase I1 / I2 / I3 / I4 分别挂在 v0.0.1 / v0.0.2 / v0.0.4 / v0.1+ 上一起发布。详见 [docs/ICONS.md](./ICONS.md)。

@@ -3,7 +3,7 @@
 > Status: **v0.0.4** · production-ready for Claude Code
 > Repo: <https://github.com/coxon/itsme>
 > Language: **Python 3.12+**
-> Last updated: 2026-05-07
+> Last updated: 2026-05-08
 
 ---
 
@@ -177,7 +177,7 @@ verbatim · 全量 · 短链            结构化 · 提炼 · 长链
 | `memory.stored` | router / intake | 已写入 MemPalace drawer |
 | `memory.routed` | router / intake | 路由决策记录（verdict + wing/room） |
 | `wiki.promoted` | intake:wiki-round | AlephRound 写入/更新 wiki pages |
-| `memory.curated` | router | 去重跳过（dedup skip） |
+| `memory.curated` | router / curator | 去重跳过（dedup）/ crosslink 回填 / refresh 清理 |
 | `memory.queried` | reader | 一次 ask 调用 |
 
 > **铁律**：type 保持窄、扩展走 payload。任何新需求**先尝试塞进现有 type 的 payload**，加新 type 要谨慎。
@@ -538,7 +538,7 @@ itsme/                                  # git repo root
 │   ├── ARCHITECTURE.md                 # 本文
 │   └── ROADMAP.md
 │
-├── tests/                              # pytest (480+ tests)
+├── tests/                              # pytest (549 tests)
 ├── pyproject.toml                      # hatchling 构建
 └── README.md
 ```
