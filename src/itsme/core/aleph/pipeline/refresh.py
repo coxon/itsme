@@ -108,7 +108,17 @@ def _dedup_history(body: str) -> tuple[str, int]:
         return body, 0
 
     before = body[:idx]
-    history_section = body[idx:]
+    rest = body[idx:]
+
+    # Find the end of the History section — next "## " header (if any).
+    next_header = re.search(r"\n## ", rest[len(history_marker) :])
+    if next_header:
+        end_idx = len(history_marker) + next_header.start()
+        history_section = rest[:end_idx]
+        after = rest[end_idx:]
+    else:
+        history_section = rest
+        after = ""
 
     lines = history_section.split("\n")
     seen: set[str] = set()
@@ -129,7 +139,7 @@ def _dedup_history(body: str) -> tuple[str, int]:
     if removed == 0:
         return body, 0
 
-    return before + "\n".join(kept), removed
+    return before + "\n".join(kept) + after, removed
 
 
 def _collapse_blanks(body: str) -> str:
@@ -196,7 +206,7 @@ def refresh(aleph: Aleph, *, dry_run: bool = False) -> RefreshResult:
             if not dry_run:
                 full_path = aleph.root / page.path
                 text = full_path.read_text(encoding="utf-8")
-                old_body = aleph._extract_body(text)
+                old_body = aleph.extract_body(text)
                 new_text = text.replace(old_body, new_body, 1)
                 full_path.write_text(new_text, encoding="utf-8")
 

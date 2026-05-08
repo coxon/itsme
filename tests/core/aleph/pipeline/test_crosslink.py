@@ -107,6 +107,22 @@ class TestShieldProtected:
         restored = _unshield(shielded, originals)
         assert restored == body
 
+    def test_multiline_callout(self) -> None:
+        """Multi-line Obsidian callouts must be fully shielded."""
+        body = "before\n> [!info]\n> line one\n> line two\nafter"
+        shielded, originals = _shield_protected(body)
+        assert "> [!info]" not in shielded
+        assert "line one" not in shielded
+        assert "line two" not in shielded
+        assert len(originals) == 1
+        assert "> line two" in originals[0]
+
+    def test_multiline_callout_roundtrip(self) -> None:
+        body = "top\n> [!warning]\n> caution\n> really\nnext para"
+        shielded, originals = _shield_protected(body)
+        restored = _unshield(shielded, originals)
+        assert restored == body
+
 
 # ================================================================ _build_target_map
 

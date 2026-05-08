@@ -50,7 +50,7 @@ _PROTECTED_RE = re.compile(
     r"```[\s\S]*?```"  # fenced code blocks
     r"|`[^`\n]+`"  # inline code
     r"|\[\[[^\]]*\]\]"  # existing [[wikilinks]]
-    r"|> \[!.*?\].*?(?=\n[^>]|\n\n|\Z)",  # Obsidian callout blocks (single)
+    r"|> \[!.*?\](?:\n> .*)*",  # Obsidian callout blocks (multi-line)
     re.MULTILINE,
 )
 
@@ -259,7 +259,7 @@ def crosslink(aleph: Aleph, *, dry_run: bool = False) -> CrosslinkResult:
                 full_path = aleph.root / page.path
                 # Re-read the full file to preserve frontmatter exactly
                 text = full_path.read_text(encoding="utf-8")
-                old_body = aleph._extract_body(text)
+                old_body = aleph.extract_body(text)
                 # Replace old body with new body
                 new_text = text.replace(old_body, new_body, 1)
                 full_path.write_text(new_text, encoding="utf-8")

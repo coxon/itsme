@@ -169,6 +169,23 @@ class TestDedupHistory:
         new_body, count = _dedup_history(body)
         assert count == 1
 
+    def test_stops_at_next_section(self) -> None:
+        """History dedup must not touch list items in a later ## section."""
+        body = (
+            "## History\n"
+            "- 2026-05-01 创建\n"
+            "- 2026-05-01 创建\n"
+            "\n"
+            "## References\n"
+            "- link A\n"
+            "- link A\n"
+        )
+        new_body, count = _dedup_history(body)
+        assert count == 1  # only the history dupe
+        # The duplicate "- link A" in References must survive
+        assert new_body.count("- link A") == 2
+        assert "## References" in new_body
+
 
 # ================================================================ _collapse_blanks
 

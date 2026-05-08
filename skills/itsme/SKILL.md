@@ -228,7 +228,7 @@ higher-quality because you chose them deliberately.
 
 ### Two-engine architecture
 
-```
+```text
 MemPalace (raw)              Aleph (wiki)
 ─────────────                ──────────────
 verbatim · high recall       curated · high precision
